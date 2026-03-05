@@ -18,25 +18,36 @@ exports.triggerSOSLogic = async (userId, latitude, longitude, address, triggerTy
     const mapLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
     const messageBody = `🚨 ${triggerType.toUpperCase()} SOS! ${user.name} needs help! Location: ${address}. View: ${mapLink}`;
 
-    // Send Real SMS via Twilio
-    const smsPromises = user.emergencyContacts.map(contact => {
-        return client.messages.create({
-            body: messageBody,
-            from: process.env.TWILIO_PHONE_NUMBER,
-            to: contact.phone
-        });
-    });
+    // Send SMS via Twilio - don't let failure block SOS creation
+    const smsResults = [];
+    for (const contact of user.emergencyContacts) {
+        try {
+            const result = await client.messages.create({
+                body: messageBody,
+                from: process.env.TWILIO_PHONE_NUMBER,
+                to: contact.phone
+            });
+            smsResults.push({ name: contact.name, phone: contact.phone, status: 'sent', sid: result.sid });
+            console.log(`✅ SMS sent to ${contact.name} (${contact.phone})`);
+        } catch (smsError) {
+            console.log(`❌ SMS to ${contact.name} (${contact.phone}) failed:`, smsError.message);
+            smsResults.push({ name: contact.name, phone: contact.phone, status: 'failed', error: smsError.message });
+        }
+    }
 
-    await Promise.all(smsPromises);
+    const sentCount = smsResults.filter(r => r.status === 'sent').length;
+    console.log(`SOS SMS: ${sentCount}/${user.emergencyContacts.length} delivered`);
 
-    // Create the Record in MongoDB
-    return await SOS.create({
+    // Always create the SOS record regardless of SMS status
+    const sosAlert = await SOS.create({
         user: userId,
         location: { latitude, longitude, address },
         triggerType,
         status: 'active',
-        notifiedContacts: user.emergencyContacts.map(c => ({ name: c.name, phone: c.phone, status: 'sent' }))
+        notifiedContacts: smsResults
     });
+
+    return { ...sosAlert.toObject(), smsSentCount: sentCount, smsTotalCount: user.emergencyContacts.length };
 };
 
 // --- ROUTE HANDLERS ---

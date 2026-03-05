@@ -1,29 +1,23 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Alert, StatusBar, ScrollView, TextInput } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Alert, StatusBar, ScrollView, TextInput, ActivityIndicator } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ExpoLocation from "expo-location";
-import * as SMS from "expo-sms";
 import * as Haptics from "expo-haptics";
 import { colors } from "../theme/colors";
 import apiClient from "../services/apiClient";
+import { triggerSOS } from "../services/sosService";
 
 export default function OfflineSOSScreen({ navigation }: any) {
     const [contacts, setContacts] = useState<{ name: string; phone: string }[]>([]);
     const [newName, setNewName] = useState("");
     const [newPhone, setNewPhone] = useState("");
-    const [smsAvailable, setSmsAvailable] = useState(false);
     const [isSending, setIsSending] = useState(false);
+    const [sendStatus, setSendStatus] = useState<string | null>(null);
 
     useEffect(() => {
-        checkSMS();
         loadContacts();
     }, []);
-
-    const checkSMS = async () => {
-        const available = await SMS.isAvailableAsync();
-        setSmsAvailable(available);
-    };
 
     const loadContacts = async () => {
         try {
@@ -36,7 +30,7 @@ export default function OfflineSOSScreen({ navigation }: any) {
                 setContacts(mapped);
             }
         } catch {
-            // Offline - use stored contacts
+            // Offline - use any locally stored contacts
         }
     };
 
@@ -54,39 +48,69 @@ export default function OfflineSOSScreen({ navigation }: any) {
         setContacts(contacts.filter((_, i) => i !== index));
     };
 
-    const sendOfflineSOS = async () => {
+    const sendEmergencySOS = async () => {
         if (contacts.length === 0) {
             Alert.alert("Error", "Add at least one emergency contact first");
             return;
         }
-        if (!smsAvailable) {
-            Alert.alert("Error", "SMS is not available on this device");
-            return;
-        }
 
         setIsSending(true);
+        setSendStatus("Getting your location...");
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
 
+        let latitude = 0, longitude = 0;
         let locationText = "Location unavailable";
+
         try {
             const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
             if (status === "granted") {
                 const loc = await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.High });
-                locationText = `https://maps.google.com/?q=${loc.coords.latitude},${loc.coords.longitude}`;
+                latitude = loc.coords.latitude;
+                longitude = loc.coords.longitude;
+                locationText = `https://maps.google.com/?q=${latitude},${longitude}`;
             }
         } catch { }
 
-        const message = `🚨 EMERGENCY SOS 🚨\n\nI need help! This is an emergency alert from SafeGuard app.\n\nMy location: ${locationText}\n\nPlease call me or send help immediately!`;
+        setSendStatus("Sending SOS via server...");
 
         try {
-            const phones = contacts.map((c) => c.phone);
-            await SMS.sendSMSAsync(phones, message);
-            Alert.alert("✅ SOS Sent!", "Emergency SMS sent to all contacts.");
-        } catch (err) {
-            Alert.alert("Error", "Failed to send SMS");
-        } finally {
-            setIsSending(false);
+            // Method 1: Use backend API (Twilio auto-SMS) — fully automatic
+            const response = await triggerSOS(latitude, longitude, `Emergency SOS - ${locationText}`);
+            if (response.success) {
+                setSendStatus(null);
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                Alert.alert(
+                    "✅ Emergency SOS Sent!",
+                    "SMS sent automatically to all emergency contacts via Twilio. No manual action needed.",
+                    [{ text: "OK", onPress: () => navigation.navigate("SOSActivated", { alertId: response.alertId }) }]
+                );
+                setIsSending(false);
+                return;
+            }
+        } catch {
+            // Backend unavailable - fall through to direct SMS
         }
+
+        setSendStatus("Server unavailable. Trying direct SMS...");
+
+        try {
+            // Method 2: Fallback - Use native SMS intent (requires user to press send)
+            const SMS = require("expo-sms");
+            const smsAvailable = await SMS.isAvailableAsync();
+            if (smsAvailable) {
+                const phones = contacts.map((c) => c.phone);
+                const message = `🚨 EMERGENCY SOS 🚨\n\nI need help! This is an emergency alert from SafeGuard app.\n\nMy location: ${locationText}\n\nPlease call me or send help immediately!`;
+                await SMS.sendSMSAsync(phones, message);
+                Alert.alert("✅ SMS Opened", "Please press send to complete the SMS.");
+            } else {
+                Alert.alert("Error", "SMS not available and server is offline.");
+            }
+        } catch {
+            Alert.alert("Error", "Could not send emergency messages. Please try calling emergency services directly.");
+        }
+
+        setSendStatus(null);
+        setIsSending(false);
     };
 
     return (
@@ -98,32 +122,43 @@ export default function OfflineSOSScreen({ navigation }: any) {
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                     <MaterialIcons name="arrow-back" size={24} color={colors.text} />
                 </TouchableOpacity>
-                <Text style={styles.title}>Offline SOS</Text>
+                <Text style={styles.title}>Emergency SOS</Text>
                 <View style={{ width: 40 }} />
             </View>
 
             <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
                 <View style={styles.iconSection}>
-                    <LinearGradient colors={[colors.offlineSOS + "20", colors.offlineSOS + "05"]} style={styles.iconCircle}>
-                        <MaterialIcons name="signal-wifi-off" size={44} color={colors.offlineSOS} />
+                    <LinearGradient colors={[colors.danger + "20", colors.danger + "05"]} style={styles.iconCircle}>
+                        <MaterialIcons name="sos" size={44} color={colors.danger} />
                     </LinearGradient>
-                    <Text style={styles.subtitle}>Send emergency SMS alerts even without internet connection</Text>
+                    <Text style={styles.subtitle}>Send emergency SMS alerts automatically to all contacts — no manual sending required</Text>
                 </View>
 
-                {/* Status */}
-                <View style={styles.statusCard}>
-                    <View style={styles.statusRow}>
-                        <MaterialIcons name="sms" size={20} color={smsAvailable ? colors.success : colors.danger} />
-                        <Text style={styles.statusText}>SMS: {smsAvailable ? "Available" : "Not Available"}</Text>
+                {/* How it works */}
+                <View style={styles.howItWorks}>
+                    <Text style={styles.howTitle}>How it works</Text>
+                    <View style={styles.howRow}>
+                        <View style={[styles.howStep, { backgroundColor: colors.info + "15" }]}>
+                            <Text style={styles.howNum}>1</Text>
+                        </View>
+                        <Text style={styles.howText}>Your GPS location is captured</Text>
                     </View>
-                    <View style={styles.statusRow}>
-                        <MaterialIcons name="people" size={20} color={contacts.length > 0 ? colors.success : colors.warning} />
-                        <Text style={styles.statusText}>{contacts.length} Emergency Contact{contacts.length !== 1 ? "s" : ""}</Text>
+                    <View style={styles.howRow}>
+                        <View style={[styles.howStep, { backgroundColor: colors.success + "15" }]}>
+                            <Text style={styles.howNum}>2</Text>
+                        </View>
+                        <Text style={styles.howText}>SMS sent automatically via Twilio (no need to press send)</Text>
+                    </View>
+                    <View style={styles.howRow}>
+                        <View style={[styles.howStep, { backgroundColor: colors.warning + "15" }]}>
+                            <Text style={styles.howNum}>3</Text>
+                        </View>
+                        <Text style={styles.howText}>Contacts receive your location + Google Maps link</Text>
                     </View>
                 </View>
 
                 {/* Contacts */}
-                <Text style={styles.sectionLabel}>Emergency Contacts</Text>
+                <Text style={styles.sectionLabel}>Emergency Contacts ({contacts.length})</Text>
                 {contacts.map((c, i) => (
                     <View key={i} style={styles.contactCard}>
                         <View style={styles.contactAvatar}>
@@ -142,7 +177,7 @@ export default function OfflineSOSScreen({ navigation }: any) {
                 {/* Add Contact */}
                 <View style={styles.addSection}>
                     <TextInput style={styles.input} placeholder="Name" placeholderTextColor={colors.lightText} value={newName} onChangeText={setNewName} />
-                    <TextInput style={styles.input} placeholder="Phone Number" placeholderTextColor={colors.lightText} value={newPhone} onChangeText={setNewPhone} keyboardType="phone-pad" />
+                    <TextInput style={styles.input} placeholder="Phone (+91...)" placeholderTextColor={colors.lightText} value={newPhone} onChangeText={setNewPhone} keyboardType="phone-pad" />
                     <TouchableOpacity onPress={addLocalContact} style={styles.addBtn}>
                         <MaterialIcons name="add" size={20} color={colors.offlineSOS} />
                         <Text style={styles.addBtnText}>Add Contact</Text>
@@ -151,14 +186,23 @@ export default function OfflineSOSScreen({ navigation }: any) {
 
                 {/* SOS Button */}
                 <TouchableOpacity
-                    onPress={sendOfflineSOS}
+                    onPress={sendEmergencySOS}
                     activeOpacity={0.8}
                     disabled={isSending}
-                    style={[styles.sosBtnWrapper, isSending && { opacity: 0.6 }]}
+                    style={[styles.sosBtnWrapper, isSending && { opacity: 0.7 }]}
                 >
                     <LinearGradient colors={[colors.danger, "#B91C1C"]} style={styles.sosBtn}>
-                        <MaterialIcons name="sos" size={28} color={colors.white} />
-                        <Text style={styles.sosBtnText}>{isSending ? "Sending..." : "Send Offline SOS"}</Text>
+                        {isSending ? (
+                            <View style={styles.sendingRow}>
+                                <ActivityIndicator color={colors.white} />
+                                <Text style={styles.sosBtnText}>{sendStatus || "Sending..."}</Text>
+                            </View>
+                        ) : (
+                            <>
+                                <MaterialIcons name="sos" size={28} color={colors.white} />
+                                <Text style={styles.sosBtnText}>Send Emergency SOS</Text>
+                            </>
+                        )}
                     </LinearGradient>
                 </TouchableOpacity>
 
@@ -177,17 +221,22 @@ const styles = StyleSheet.create({
 
     iconSection: { alignItems: "center", marginVertical: 20 },
     iconCircle: { width: 90, height: 90, borderRadius: 45, justifyContent: "center", alignItems: "center", marginBottom: 12 },
-    subtitle: { textAlign: "center", color: colors.textSecondary, fontSize: 14, lineHeight: 22 },
+    subtitle: {
+        textAlign: "center", color: colors.textSecondary, fontSize: 14, lineHeight: 22
+    },
 
-    statusCard: { backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.border, gap: 10 },
-    statusRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-    statusText: { fontSize: 14, color: colors.text, fontWeight: "600" },
+    howItWorks: { backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.border, marginBottom: 16 },
+    howTitle: { fontSize: 14, fontWeight: "800", color: colors.text, marginBottom: 12 },
+    howRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 8 },
+    howStep: { width: 28, height: 28, borderRadius: 14, justifyContent: "center", alignItems: "center" },
+    howNum: { fontSize: 12, fontWeight: "800", color: colors.text },
+    howText: { flex: 1, fontSize: 12, color: colors.textSecondary, lineHeight: 18 },
 
-    sectionLabel: { fontSize: 16, fontWeight: "800", color: colors.text, marginTop: 24, marginBottom: 12 },
+    sectionLabel: { fontSize: 16, fontWeight: "800", color: colors.text, marginTop: 8, marginBottom: 12 },
 
     contactCard: { flexDirection: "row", alignItems: "center", backgroundColor: colors.surface, padding: 14, borderRadius: 14, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
-    contactAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.offlineSOS + "20", justifyContent: "center", alignItems: "center" },
-    contactInitial: { fontSize: 18, fontWeight: "800", color: colors.offlineSOS },
+    contactAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.danger + "20", justifyContent: "center", alignItems: "center" },
+    contactInitial: { fontSize: 18, fontWeight: "800", color: colors.danger },
     contactInfo: { flex: 1, marginLeft: 12 },
     contactName: { fontSize: 14, fontWeight: "700", color: colors.text },
     contactPhone: { fontSize: 12, color: colors.lightText, marginTop: 2 },
@@ -200,4 +249,5 @@ const styles = StyleSheet.create({
     sosBtnWrapper: { borderRadius: 16, overflow: "hidden", marginTop: 24 },
     sosBtn: { flexDirection: "row", justifyContent: "center", alignItems: "center", paddingVertical: 18, gap: 10 },
     sosBtnText: { fontSize: 18, fontWeight: "800", color: colors.white },
+    sendingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
 });

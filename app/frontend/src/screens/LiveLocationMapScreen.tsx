@@ -8,7 +8,7 @@ import {
     ActivityIndicator
 } from "react-native";
 
-import MapView, { Marker } from "react-native-maps";
+import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import * as Location from "expo-location";
 
 import { colors } from "../theme/colors";
@@ -48,10 +48,10 @@ export default function LiveLocationMapScreen({ navigation }: any) {
         try {
             // Start location sharing
             await startLocationSharing();
-            
+
             // Update current location
             await updateLocation(location.latitude, location.longitude);
-            
+
             Alert.alert("Success", "Live location sharing started");
             navigation.navigate("LocationSharingStatus");
         } catch (error: any) {
@@ -75,6 +75,7 @@ export default function LiveLocationMapScreen({ navigation }: any) {
         <View style={styles.container}>
 
             <MapView
+                provider={PROVIDER_GOOGLE}
                 style={styles.map}
                 region={{
                     latitude: location.latitude,

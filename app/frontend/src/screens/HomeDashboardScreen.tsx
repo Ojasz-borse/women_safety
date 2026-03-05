@@ -108,13 +108,18 @@ export default function HomeDashboardScreen({ navigation }: any) {
                                     address = `${geo[0].street || ""}, ${geo[0].city || ""}, ${geo[0].region || ""}`.trim() || "User Location";
                                 }
                             } catch { }
-                            const data = await triggerSOS(location.coords.latitude, location.coords.longitude, address);
-                            if (data.success) {
-                                Alert.alert("🚨 SOS Sent!", "Your emergency contacts have been notified.");
-                                navigation.navigate("SOSActivated", { alertId: data.alertId });
+
+                            try {
+                                const data = await triggerSOS(location.coords.latitude, location.coords.longitude, address);
+                                const alertId = data?.alertId || data?._id || "local-" + Date.now();
+                                navigation.navigate("SOSActivated", { alertId });
+                            } catch (apiError) {
+                                // Even if backend fails, still show SOS screen for user feedback
+                                navigation.navigate("SOSActivated", { alertId: "offline-" + Date.now() });
+                                Alert.alert("⚠️ Partial SOS", "SOS screen activated. Backend may be offline - SMS may not have been sent.");
                             }
                         } catch (error: any) {
-                            Alert.alert("SOS Error", error.message || "Failed to trigger SOS");
+                            Alert.alert("SOS Error", error.message || "Failed to get location. Please try again.");
                         }
                     },
                 },
