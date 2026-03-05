@@ -1,22 +1,16 @@
 const express = require('express');
 const router = express.Router();
-// Use destructuring to pull all functions
-const { 
-  triggerSOS, 
-  getSOSStatus, 
-  sendAlert, 
-  updateSOSLocation, 
-  resolveSOS, 
-  cancelSOS 
-} = require('../controllers/sosController');
+// We import the whole object as sosController
+const sosController = require('../controllers/sosController');
 const { protect } = require('../middleware/authMiddleware');
 
-// Define Routes
-router.post('/trigger', protect, triggerSOS);
-router.post('/cancel', protect, cancelSOS); // Ensure this function exists in controller!
-router.get('/status', protect, getSOSStatus);
-router.post('/send-alert', protect, sendAlert);
-router.put('/update-location', protect, updateSOSLocation);
-router.post('/resolve', protect, resolveSOS);
+// You must prefix the functions with 'sosController.'
+router.post('/trigger', protect, sosController.triggerSOS);
+router.post('/voice-trigger', protect, sosController.voiceTriggerSOS); // Fixed line
+router.post('/shake-trigger', protect, sosController.shakeTriggerSOS);
+router.post('/resolve', protect, sosController.resolveSOS);
+router.post('/cancel', protect, sosController.cancelSOS);
+router.put('/update-location', protect, sosController.updateSOSLocation);
+router.get('/status', protect, sosController.getSOSStatus);
 
 module.exports = router;
