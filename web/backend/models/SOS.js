@@ -22,6 +22,11 @@ const sosSchema = new mongoose.Schema({
     enum: ['active', 'resolved', 'cancelled'],
     default: 'active'
   },
+  triggerType: { 
+    type: String, 
+    enum: ['manual', 'shake', 'timer'], 
+    default: 'manual' 
+  },
   notifiedContacts: [{
     name: String,
     phone: String,

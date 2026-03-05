@@ -202,31 +202,19 @@ exports.forgotPassword = async (req, res) => {
 };
 
 exports.resetPassword = async (req, res) => {
-  try {
-    const { token, newPassword } = req.body; 
+    try {
+        const { password } = req.body; // Check if this name matches Postman
 
-    const resetPasswordToken = crypto.createHash('sha256').update(token).digest('hex');
+        if (!password) {
+            return res.status(400).json({ message: "Please provide a new password" });
+        }
 
-    const user = await User.findOne({
-      resetPasswordToken,
-      resetPasswordExpire: { $gt: Date.now() }
-    });
+        // The error happens here if 'password' is undefined
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
 
-    if (!user) {
-      return res.status(400).json({ message: 'Invalid or expired token' });
+        // ... rest of your update logic
+    } catch (error) {
+        res.status(500).json({ message: "Server error", error: error.message });
     }
-
-
-    const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(newPassword, salt);
-    
-
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpire = undefined;
-    await user.save();
-
-    res.status(200).json({ message: 'Password has been reset successfully' });
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
 };
