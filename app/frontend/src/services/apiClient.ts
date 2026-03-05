@@ -2,7 +2,8 @@ import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
 // For Android Emulator, use 10.0.2.2. For iOS or Physical devices, use your computer's IP address.
-const BASE_URL = 'http://10.79.206.236:3000/api';
+// Use Render backend URL for production
+const BASE_URL = 'https://women-safety-51m4.onrender.com/api';
 
 const apiClient = axios.create({
   baseURL: BASE_URL,
