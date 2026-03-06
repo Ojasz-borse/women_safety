@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "SafeGuard",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -22,11 +22,6 @@
         "backgroundImage": "./assets/icon-background.png",
         "monochromeImage": "./assets/icon-monochrome.png"
       },
-      "config": {
-        "googleMaps": {
-          "apiKey": "YOUR_GOOGLE_MAPS_API_KEY_HERE"
-        }
-      },
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -34,21 +29,16 @@
         "CAMERA",
         "RECORD_AUDIO",
         "VIBRATE",
-        "SEND_SMS",
         "READ_CONTACTS",
         "BLUETOOTH",
-        "BLUETOOTH_ADMIN",
-        "BLUETOOTH_SCAN",
         "BLUETOOTH_CONNECT"
-      ],
-      "predictiveBackGestureEnabled": false
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store",
-      "react-native-ble-plx"
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {
