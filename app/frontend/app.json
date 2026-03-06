@@ -18,9 +18,9 @@
       "package": "com.safeguard.womensafety",
       "adaptiveIcon": {
         "backgroundColor": "#0D0B1A",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/icon-foreground.png",
+        "backgroundImage": "./assets/icon-background.png",
+        "monochromeImage": "./assets/icon-monochrome.png"
       },
       "config": {
         "googleMaps": {
@@ -39,7 +39,10 @@
         "BLUETOOTH",
         "BLUETOOTH_ADMIN",
         "BLUETOOTH_SCAN",
-        "BLUETOOTH_CONNECT"
+        "BLUETOOTH_CONNECT",
+        "FOREGROUND_SERVICE",
+        "RECEIVE_BOOT_COMPLETED",
+        "WAKE_LOCK"
       ],
       "predictiveBackGestureEnabled": false
     },
@@ -48,7 +51,19 @@
     },
     "plugins": [
       "expo-secure-store",
-      "react-native-ble-plx"
+      "react-native-ble-plx",
+      [
+        "expo-background-fetch",
+        {
+          "backgroundFetchMode": "always"
+        }
+      ],
+      [
+        "expo-task-manager",
+        {
+          "backgroundTaskIdentifier": "shake-detector"
+        }
+      ]
     ],
     "extra": {
       "eas": {}

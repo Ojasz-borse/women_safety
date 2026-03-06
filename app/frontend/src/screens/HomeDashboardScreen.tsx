@@ -11,6 +11,7 @@ import {
     ScrollView,
     Dimensions,
     StatusBar,
+    Platform,
 } from "react-native";
 
 import { Accelerometer } from "expo-sensors";
@@ -21,6 +22,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import { colors } from "../theme/colors";
 import { triggerSOS } from "../services/sosService";
 import SidebarDrawer from "../components/SidebarDrawer";
+import { shakeDetectorService } from "../services/ShakeDetectorService";
+import * as BackgroundFetch from 'expo-background-fetch';
+import * as TaskManager from 'expo-task-manager';
 
 const { width } = Dimensions.get("window");
 
@@ -67,6 +71,13 @@ export default function HomeDashboardScreen({ navigation }: any) {
         Animated.loop(
             Animated.timing(glowAnim, { toValue: 1, duration: 3000, easing: Easing.linear, useNativeDriver: true })
         ).start();
+
+        // Initialize background shake detection
+        initShakeDetection();
+
+        return () => {
+            // Cleanup handled by shakeDetectorService
+        };
     }, []);
 
     useEffect(() => {
@@ -80,6 +91,80 @@ export default function HomeDashboardScreen({ navigation }: any) {
         };
         loadUser();
     }, []);
+
+    // Initialize shake detection that works in background/lock screen
+    const initShakeDetection = async () => {
+        try {
+            // Request background fetch permissions (iOS)
+            if (Platform.OS === 'ios') {
+                const status = await BackgroundFetch.getStatusAsync();
+                if (status === BackgroundFetch.Status.Denied) {
+                    console.log('⚠️ Background fetch not available');
+                } else {
+                    await shakeDetectorService.initBackgroundTask();
+                }
+            }
+
+            // Start shake detection
+            shakeDetectorService.start(() => {
+                // This callback runs when 3 shakes are detected
+                console.log('🚨 Shake detector triggered SOS!');
+                handleSOSFromShake();
+            });
+
+            console.log('✅ Shake detection initialized');
+        } catch (error) {
+            console.log('❌ Failed to initialize shake detection:', error);
+        }
+    };
+
+    // Handle SOS triggered from shake (simplified, no confirmation dialog)
+    const handleSOSFromShake = async () => {
+        try {
+            // Vibrate to confirm shake detected
+            if (Platform.OS === 'android') {
+                const { Vibration } = require('react-native');
+                Vibration.vibrate([200, 100, 200]);
+            }
+
+            const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
+            if (status !== "granted") {
+                Alert.alert("Error", "Location permission required for SOS");
+                return;
+            }
+
+            const location = await ExpoLocation.getCurrentPositionAsync({ 
+                accuracy: ExpoLocation.Accuracy.High,
+                timeout: 10000
+            });
+
+            let address = "User Location";
+            try {
+                const geo = await ExpoLocation.reverseGeocodeAsync({
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                });
+                if (geo.length > 0) {
+                    address = `${geo[0].street || ""}, ${geo[0].city || ""}, ${geo[0].region || ""}`.trim() || "User Location";
+                }
+            } catch { }
+
+            const data = await triggerSOS(location.coords.latitude, location.coords.longitude, address);
+            const alertId = data?.alertId || data?._id || "local-" + Date.now();
+
+            // Navigate to SOS screen
+            navigation.navigate("SOSActivated", { alertId });
+
+            Alert.alert(
+                "🚨 SOS SENT!",
+                "Emergency alerts have been sent to your contacts. Help is on the way!",
+                [{ text: "OK" }]
+            );
+        } catch (error: any) {
+            console.log('SOS from shake failed:', error);
+            Alert.alert("SOS Error", "Failed to send SOS. Please try manually.");
+        }
+    };
 
     const handleSOS = async () => {
         Alert.alert(
@@ -126,32 +211,6 @@ export default function HomeDashboardScreen({ navigation }: any) {
             ]
         );
     };
-
-    // 3-shake detection
-    useEffect(() => {
-        Accelerometer.setUpdateInterval(300);
-        const subscription = Accelerometer.addListener(({ x, y, z }) => {
-            const acceleration = Math.sqrt(x * x + y * y + z * z);
-            if (acceleration > 2.5) {
-                const now = Date.now();
-                if (now - lastShake.current > 500) {
-                    lastShake.current = now;
-                    shakeCount.current += 1;
-
-                    if (shakeTimer.current) clearTimeout(shakeTimer.current);
-                    shakeTimer.current = setTimeout(() => {
-                        shakeCount.current = 0;
-                    }, 3000);
-
-                    if (shakeCount.current >= 3) {
-                        shakeCount.current = 0;
-                        handleSOS();
-                    }
-                }
-            }
-        });
-        return () => subscription.remove();
-    }, []);
 
     const glowRotation = glowAnim.interpolate({
         inputRange: [0, 1],
