@@ -39,10 +39,7 @@
         "BLUETOOTH",
         "BLUETOOTH_ADMIN",
         "BLUETOOTH_SCAN",
-        "BLUETOOTH_CONNECT",
-        "FOREGROUND_SERVICE",
-        "RECEIVE_BOOT_COMPLETED",
-        "WAKE_LOCK"
+        "BLUETOOTH_CONNECT"
       ],
       "predictiveBackGestureEnabled": false
     },
@@ -51,22 +48,12 @@
     },
     "plugins": [
       "expo-secure-store",
-      "react-native-ble-plx",
-      [
-        "expo-background-fetch",
-        {
-          "backgroundFetchMode": "always"
-        }
-      ],
-      [
-        "expo-task-manager",
-        {
-          "backgroundTaskIdentifier": "shake-detector"
-        }
-      ]
+      "react-native-ble-plx"
     ],
     "extra": {
-      "eas": {}
+      "eas": {
+        "projectId": "fa643c5a-b9bf-4056-9bd9-efd187c550aa"
+      }
     }
   }
 }
