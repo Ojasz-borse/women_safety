@@ -1,4 +1,5 @@
 import apiClient from './apiClient';
+import * as SecureStore from 'expo-secure-store';
 
 export type EvidenceItem = {
     _id: string;
@@ -11,12 +12,8 @@ export type EvidenceItem = {
 };
 
 /**
- * Upload evidence recording to backend
- * @param fileUri - Local file URI of the recording
- * @param type - Type of recording ('audio' or 'video')
- * @param duration - Duration in seconds
- * @param linkedSOS - Optional linked SOS alert ID
- * @param notes - Optional notes
+ * Upload evidence recording to backend using XMLHttpRequest
+ * This is more reliable than axios for React Native file uploads
  */
 export const uploadEvidence = async (
     fileUri: string,
@@ -24,53 +21,76 @@ export const uploadEvidence = async (
     duration: number,
     linkedSOS?: string,
     notes?: string
-) => {
-    try {
-        console.log("🎤 Starting evidence upload:", fileUri);
-        
-        // Create FormData
-        const formData = new FormData();
+): Promise<any> => {
+    return new Promise((resolve, reject) => {
+        try {
+            console.log("🎤 Starting evidence upload:", fileUri);
+            
+            const formData = new FormData();
+            
+            const fileExtension = type === 'audio' ? '.m4a' : '.mp4';
+            const fileName = `evidence_${Date.now()}${fileExtension}`;
+            
+            // React Native FormData file structure
+            (formData as any).append('file', {
+                uri: fileUri,
+                name: fileName,
+                type: type === 'audio' ? 'audio/mp4' : 'video/mp4',
+            });
+            
+            formData.append('type', type);
+            formData.append('duration', duration.toString());
+            if (linkedSOS) formData.append('linkedSOS', linkedSOS);
+            if (notes) formData.append('notes', notes);
 
-        // React Native requires specific file object structure
-        const fileExtension = type === 'audio' ? '.m4a' : '.mp4';
-        const fileName = `evidence_${Date.now()}${fileExtension}`;
-        
-        // For React Native, the file object must have uri, name, and type
-        const fileToUpload = {
-            uri: fileUri,
-            name: fileName,
-            type: type === 'audio' ? 'audio/mp4' : 'video/mp4',
-        };
+            console.log("📦 FormData created:");
+            console.log("  - File URI:", fileUri);
+            console.log("  - File name:", fileName);
+            console.log("  - Duration:", duration);
 
-        formData.append('file', fileToUpload as any);
-        formData.append('type', type);
-        formData.append('duration', duration.toString());
-        if (linkedSOS) formData.append('linkedSOS', linkedSOS);
-        if (notes) formData.append('notes', notes);
-
-        console.log("📦 FormData created:");
-        console.log("  - File URI:", fileUri);
-        console.log("  - File name:", fileName);
-        console.log("  - File type:", fileToUpload.type);
-        console.log("  - Duration:", duration);
-
-        const response = await apiClient.post('/evidence/upload', formData, {
-            // Let axios set the Content-Type with boundary automatically
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-        });
-
-        console.log("✅ Upload successful");
-        return response.data;
-    } catch (error: any) {
-        console.error('❌ Upload evidence error:', error);
-        if (error.response) {
-            console.error("Response status:", error.response.status);
-            console.error("Response data:", JSON.stringify(error.response.data));
-            console.error("Response headers:", error.response.headers);
+            // Get token from SecureStore
+            SecureStore.getItemAsync('token').then(token => {
+                const xhr = new XMLHttpRequest();
+                
+                xhr.onload = () => {
+                    console.log("XHR Response:", xhr.status, xhr.responseText);
+                    if (xhr.status === 200 || xhr.status === 201) {
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            console.log("✅ Upload successful");
+                            resolve(response);
+                        } catch (e) {
+                            console.error("Failed to parse response:", e);
+                            reject(new Error("Failed to parse server response"));
+                        }
+                    } else {
+                        console.error("Upload failed with status:", xhr.status);
+                        try {
+                            const errorData = JSON.parse(xhr.responseText);
+                            reject(errorData);
+                        } catch {
+                            reject(new Error(`Upload failed: ${xhr.status}`));
+                        }
+                    }
+                };
+                
+                xhr.onerror = () => {
+                    console.error("XHR network error");
+                    reject(new Error("Network error during upload"));
+                };
+                
+                xhr.open('POST', 'https://women-safety-51m4.onrender.com/api/evidence/upload');
+                xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+                // Don't set Content-Type - let the browser set it with boundary
+                xhr.send(formData);
+                
+                console.log("📤 XHR request sent");
+            });
+        } catch (error: any) {
+            console.error('❌ Upload evidence error:', error);
+            reject(error);
         }
-        throw error.response?.data || error.message;
-    }
+    });
 };
 
 /**
