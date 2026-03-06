@@ -54,6 +54,8 @@ export default function VoiceDistressScreen({ navigation }: any) {
     }, [isListening]);
 
     useEffect(() => {
+        // Auto-start monitoring when screen opens
+        startListening();
         return () => { stopListening(); };
     }, []);
 

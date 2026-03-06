@@ -6,9 +6,10 @@ const path = require('path');
 exports.uploadEvidence = async (req, res) => {
     try {
         console.log("=== Evidence Upload Request ===");
-        console.log("User:", req.user);
+        console.log("Headers:", JSON.stringify(req.headers, null, 2));
         console.log("Body:", req.body);
         console.log("File:", req.file);
+        console.log("Files:", req.files);
         
         if (!req.user) {
             console.log("❌ No user in request - authentication failed");
@@ -16,9 +17,15 @@ exports.uploadEvidence = async (req, res) => {
         }
 
         if (!req.file) {
-            console.log("❌ No file uploaded");
-            return res.status(400).json({ message: "No file uploaded" });
+            console.log("❌ No file uploaded - multer didn't process the file");
+            console.log("Content-Type header:", req.headers['content-type']);
+            return res.status(400).json({ 
+                message: "No file uploaded", 
+                details: "Multer did not receive a file. Make sure the file is attached as 'file' in FormData."
+            });
         }
+
+        console.log("✅ File received:", req.file.originalname, req.file.size, "bytes");
 
         const { type, duration, linkedSOS, notes } = req.body;
 

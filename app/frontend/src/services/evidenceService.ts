@@ -31,21 +31,34 @@ export const uploadEvidence = async (
         // Create FormData
         const formData = new FormData();
 
-        // Append file (React Native specific format)
-        formData.append('file', {
+        // React Native requires specific file object structure
+        const fileExtension = type === 'audio' ? '.m4a' : '.mp4';
+        const fileName = `evidence_${Date.now()}${fileExtension}`;
+        
+        // For React Native, the file object must have uri, name, and type
+        const fileToUpload = {
             uri: fileUri,
+            name: fileName,
             type: type === 'audio' ? 'audio/mp4' : 'video/mp4',
-            name: `evidence_${Date.now()}.${type === 'audio' ? 'm4a' : 'mp4'}`,
-        } as any);
+        };
 
+        formData.append('file', fileToUpload as any);
         formData.append('type', type);
         formData.append('duration', duration.toString());
         if (linkedSOS) formData.append('linkedSOS', linkedSOS);
         if (notes) formData.append('notes', notes);
 
-        console.log("📦 FormData created, sending request...");
+        console.log("📦 FormData created:");
+        console.log("  - File URI:", fileUri);
+        console.log("  - File name:", fileName);
+        console.log("  - File type:", fileToUpload.type);
+        console.log("  - Duration:", duration);
 
-        const response = await apiClient.post('/evidence/upload', formData);
+        const response = await apiClient.post('/evidence/upload', formData, {
+            // Let axios set the Content-Type with boundary automatically
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+        });
 
         console.log("✅ Upload successful");
         return response.data;
@@ -53,7 +66,8 @@ export const uploadEvidence = async (
         console.error('❌ Upload evidence error:', error);
         if (error.response) {
             console.error("Response status:", error.response.status);
-            console.error("Response data:", error.response.data);
+            console.error("Response data:", JSON.stringify(error.response.data));
+            console.error("Response headers:", error.response.headers);
         }
         throw error.response?.data || error.message;
     }

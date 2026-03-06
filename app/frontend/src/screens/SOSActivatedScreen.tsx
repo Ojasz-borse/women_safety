@@ -3,15 +3,21 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, StatusBar, Animated, V
 import { MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ExpoLocation from "expo-location";
+import * as SMS from "expo-sms";
 import * as Haptics from "expo-haptics";
 import { colors } from "../theme/colors";
 import { updateSOSLocation, resolveSOS, cancelSOS } from "../services/sosService";
+import SirenPlayer from "../services/SirenPlayer";
+import apiClient from "../services/apiClient";
 
 export default function SOSActivatedScreen({ navigation, route }: any) {
     const { alertId } = route.params || {};
     const [elapsed, setElapsed] = useState(0);
     const [lastAddress, setLastAddress] = useState("Tracking...");
+    const [sirenActive, setSirenActive] = useState(true);
+    const [smsSent, setSmsSent] = useState(false);
     const pulseAnim = useRef(new Animated.Value(1)).current;
+    const flashAnim = useRef(new Animated.Value(0)).current;
     const locationIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -24,8 +30,20 @@ export default function SOSActivatedScreen({ navigation, route }: any) {
             ])
         ).start();
 
-        // Vibration
-        Vibration.vibrate([0, 500, 200, 500]);
+        // Red flash animation
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(flashAnim, { toValue: 0.3, duration: 500, useNativeDriver: false }),
+                Animated.timing(flashAnim, { toValue: 0, duration: 500, useNativeDriver: false }),
+            ])
+        ).start();
+
+        // Start siren + vibration
+        SirenPlayer.play();
+        Vibration.vibrate([0, 800, 200, 800, 200, 800], true); // Repeating pattern
+
+        // Auto-send SMS to emergency contacts
+        autoSendSMS();
 
         // Start location tracking
         startLocationTracking();
@@ -34,17 +52,55 @@ export default function SOSActivatedScreen({ navigation, route }: any) {
         timerRef.current = setInterval(() => setElapsed((p) => p + 1), 1000);
 
         return () => {
+            SirenPlayer.stop();
+            Vibration.cancel();
             if (locationIntervalRef.current) clearInterval(locationIntervalRef.current);
             if (timerRef.current) clearInterval(timerRef.current);
         };
     }, []);
+
+    const autoSendSMS = async () => {
+        try {
+            // Get emergency contacts
+            let contacts: any[] = [];
+            try {
+                const res = await apiClient.get("/contacts");
+                contacts = Array.isArray(res.data) ? res.data : res.data?.data || [];
+            } catch { }
+
+            if (contacts.length === 0) return;
+
+            // Get current location for SMS
+            let locationText = "Location unavailable";
+            let mapLink = "";
+            try {
+                const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
+                if (status === "granted") {
+                    const loc = await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.High });
+                    mapLink = `https://maps.google.com/?q=${loc.coords.latitude},${loc.coords.longitude}`;
+                    locationText = mapLink;
+                }
+            } catch { }
+
+            const phones = contacts.map((c: any) => c.phone).filter(Boolean);
+            const message = `🚨 EMERGENCY SOS! I need immediate help! My location: ${locationText} — Sent from SafeGuard App`;
+
+            // Use expo-sms for auto-compose
+            const isAvailable = await SMS.isAvailableAsync();
+            if (isAvailable && phones.length > 0) {
+                await SMS.sendSMSAsync(phones, message);
+                setSmsSent(true);
+            }
+        } catch (err) {
+            console.log("Auto SMS error:", err);
+        }
+    };
 
     const startLocationTracking = async () => {
         try {
             const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
             if (status !== "granted") return;
 
-            // Update location every 10 seconds
             locationIntervalRef.current = setInterval(async () => {
                 try {
                     const location = await ExpoLocation.getCurrentPositionAsync({ accuracy: ExpoLocation.Accuracy.High });
@@ -61,12 +117,24 @@ export default function SOSActivatedScreen({ navigation, route }: any) {
 
                     setLastAddress(address);
 
-                    if (alertId) {
+                    if (alertId && !alertId.startsWith("local-") && !alertId.startsWith("offline-")) {
                         await updateSOSLocation(alertId, location.coords.latitude, location.coords.longitude, address);
                     }
                 } catch { }
             }, 10000);
         } catch { }
+    };
+
+    const toggleSiren = () => {
+        if (sirenActive) {
+            SirenPlayer.stop();
+            Vibration.cancel();
+            setSirenActive(false);
+        } else {
+            SirenPlayer.play();
+            Vibration.vibrate([0, 800, 200, 800, 200, 800], true);
+            setSirenActive(true);
+        }
     };
 
     const formatElapsed = (sec: number) => {
@@ -76,18 +144,22 @@ export default function SOSActivatedScreen({ navigation, route }: any) {
     };
 
     const handleSafe = () => {
-        Alert.alert("Mark Safe?", "Confirm that you are safe. This will stop the SOS alert.", [
+        Alert.alert("Mark Safe?", "Confirm that you are safe. This will stop the SOS alert and siren.", [
             { text: "Cancel", style: "cancel" },
             {
                 text: "I'm Safe",
                 onPress: async () => {
+                    SirenPlayer.stop();
+                    Vibration.cancel();
                     try {
-                        if (alertId) await resolveSOS(alertId, "Marked safe by user");
+                        if (alertId && !alertId.startsWith("local-") && !alertId.startsWith("offline-")) {
+                            await resolveSOS(alertId, "Marked safe by user");
+                        }
                         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                         Alert.alert("✅ Marked Safe", "Glad you're safe!");
                         navigation.navigate("HomeDashboard");
                     } catch {
-                        Alert.alert("Error", "Failed to resolve SOS");
+                        navigation.navigate("HomeDashboard");
                     }
                 },
             },
@@ -95,18 +167,20 @@ export default function SOSActivatedScreen({ navigation, route }: any) {
     };
 
     const handleCancel = () => {
-        Alert.alert("Cancel SOS?", "Are you sure? Your emergency contacts will stop receiving updates.", [
+        Alert.alert("Cancel SOS?", "Your emergency contacts will stop receiving updates.", [
             { text: "No", style: "cancel" },
             {
                 text: "Yes, Cancel",
                 style: "destructive",
                 onPress: async () => {
+                    SirenPlayer.stop();
+                    Vibration.cancel();
                     try {
-                        if (alertId) await cancelSOS(alertId);
-                        navigation.navigate("HomeDashboard");
-                    } catch {
-                        Alert.alert("Error", "Failed to cancel SOS");
-                    }
+                        if (alertId && !alertId.startsWith("local-") && !alertId.startsWith("offline-")) {
+                            await cancelSOS(alertId);
+                        }
+                    } catch { }
+                    navigation.navigate("HomeDashboard");
                 },
             },
         ]);
@@ -115,7 +189,13 @@ export default function SOSActivatedScreen({ navigation, route }: any) {
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
-            <LinearGradient colors={["#1A0505", colors.background, "#0D0B1A"]} style={StyleSheet.absoluteFill} />
+
+            {/* Red flash overlay */}
+            <Animated.View
+                style={[StyleSheet.absoluteFill, { backgroundColor: "#EF4444", opacity: flashAnim, zIndex: 0 }]}
+            />
+
+            <LinearGradient colors={["#1A0505", colors.background, "#0D0B1A"]} style={[StyleSheet.absoluteFill, { zIndex: 0 }]} />
 
             <View style={styles.content}>
                 {/* Alert Header */}
@@ -126,7 +206,7 @@ export default function SOSActivatedScreen({ navigation, route }: any) {
                 </Animated.View>
 
                 <Text style={styles.alertTitle}>🚨 SOS Alert Active</Text>
-                <Text style={styles.alertSubtitle}>Your emergency contacts have been notified and can track your location</Text>
+                <Text style={styles.alertSubtitle}>Emergency contacts notified. Siren is active.</Text>
 
                 {/* Status Cards */}
                 <View style={styles.statusRow}>
@@ -140,17 +220,23 @@ export default function SOSActivatedScreen({ navigation, route }: any) {
                         <Text style={styles.statusValue}>LIVE</Text>
                         <Text style={styles.statusLabel}>Tracking</Text>
                     </View>
-                    <View style={styles.statusCard}>
-                        <MaterialIcons name="sms" size={20} color={colors.info} />
-                        <Text style={styles.statusValue}>Sent</Text>
-                        <Text style={styles.statusLabel}>SMS</Text>
-                    </View>
+                    <TouchableOpacity onPress={toggleSiren} style={styles.statusCard}>
+                        <MaterialIcons name={sirenActive ? "volume-up" : "volume-off"} size={20} color={sirenActive ? colors.danger : colors.lightText} />
+                        <Text style={[styles.statusValue, { color: sirenActive ? colors.danger : colors.lightText }]}>{sirenActive ? "ON" : "OFF"}</Text>
+                        <Text style={styles.statusLabel}>Siren</Text>
+                    </TouchableOpacity>
                 </View>
 
                 {/* Location */}
                 <View style={styles.locationCard}>
                     <MaterialIcons name="location-on" size={20} color={colors.danger} />
                     <Text style={styles.locationText}>{lastAddress}</Text>
+                </View>
+
+                {/* SMS Status */}
+                <View style={[styles.locationCard, { borderColor: smsSent ? colors.success : colors.border }]}>
+                    <MaterialIcons name="sms" size={20} color={smsSent ? colors.success : colors.warning} />
+                    <Text style={styles.locationText}>{smsSent ? "Emergency SMS sent ✅" : "Sending SMS to contacts..."}</Text>
                 </View>
 
                 {/* Actions */}
@@ -167,12 +253,6 @@ export default function SOSActivatedScreen({ navigation, route }: any) {
                         <Text style={styles.cancelBtnText}>Cancel SOS</Text>
                     </View>
                 </TouchableOpacity>
-
-                {/* Help text */}
-                <View style={styles.helpCard}>
-                    <MaterialIcons name="info-outline" size={16} color={colors.info} />
-                    <Text style={styles.helpText}>Your location is being shared every 10 seconds. Emergency services have been notified via SMS.</Text>
-                </View>
             </View>
         </View>
     );
@@ -180,30 +260,27 @@ export default function SOSActivatedScreen({ navigation, route }: any) {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
-    content: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 24 },
+    content: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 24, zIndex: 1 },
 
     alertCircle: { marginBottom: 20 },
     alertGradient: { width: 100, height: 100, borderRadius: 50, justifyContent: "center", alignItems: "center", shadowColor: colors.danger, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.5, shadowRadius: 20, elevation: 15 },
 
     alertTitle: { fontSize: 28, fontWeight: "900", color: colors.text, textAlign: "center" },
-    alertSubtitle: { fontSize: 14, color: colors.textSecondary, textAlign: "center", marginTop: 8, lineHeight: 22, paddingHorizontal: 20 },
+    alertSubtitle: { fontSize: 14, color: colors.textSecondary, textAlign: "center", marginTop: 6, lineHeight: 22 },
 
-    statusRow: { flexDirection: "row", gap: 10, marginTop: 24, width: "100%" },
+    statusRow: { flexDirection: "row", gap: 10, marginTop: 20, width: "100%" },
     statusCard: { flex: 1, alignItems: "center", backgroundColor: colors.surface, padding: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.border },
     statusValue: { fontSize: 16, fontWeight: "900", color: colors.text, marginTop: 6 },
     statusLabel: { fontSize: 10, color: colors.lightText, marginTop: 2 },
 
-    locationCard: { flexDirection: "row", alignItems: "center", backgroundColor: colors.surface, padding: 14, borderRadius: 14, marginTop: 16, width: "100%", borderWidth: 1, borderColor: colors.border, gap: 10 },
+    locationCard: { flexDirection: "row", alignItems: "center", backgroundColor: colors.surface, padding: 14, borderRadius: 14, marginTop: 10, width: "100%", borderWidth: 1, borderColor: colors.border, gap: 10 },
     locationText: { flex: 1, fontSize: 13, color: colors.textSecondary, fontWeight: "600" },
 
-    safeBtnWrapper: { width: "100%", borderRadius: 16, overflow: "hidden", marginTop: 24 },
+    safeBtnWrapper: { width: "100%", borderRadius: 16, overflow: "hidden", marginTop: 20 },
     actionBtn: { flexDirection: "row", justifyContent: "center", alignItems: "center", paddingVertical: 18, gap: 10 },
     actionBtnText: { fontSize: 18, fontWeight: "800", color: colors.white },
 
     cancelBtnWrapper: { width: "100%", marginTop: 10 },
     cancelBtn: { flexDirection: "row", justifyContent: "center", alignItems: "center", paddingVertical: 14, gap: 6, borderRadius: 14, borderWidth: 1.5, borderColor: colors.danger },
     cancelBtnText: { fontSize: 15, fontWeight: "700", color: colors.danger },
-
-    helpCard: { flexDirection: "row", backgroundColor: colors.surface, padding: 12, borderRadius: 12, marginTop: 20, borderWidth: 1, borderColor: colors.border, gap: 8 },
-    helpText: { flex: 1, fontSize: 11, color: colors.lightText, lineHeight: 16 },
 });

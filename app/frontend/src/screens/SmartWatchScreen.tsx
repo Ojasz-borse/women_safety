@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Alert, StatusBar, ScrollView, Switch, PermissionsAndroid, Platform } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Alert, StatusBar, ScrollView, Switch, PermissionsAndroid, Platform, Animated, Vibration } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
@@ -32,13 +32,22 @@ export default function SmartWatchScreen({ navigation }: any) {
     const [autoSOS, setAutoSOS] = useState(true);
     const [heartMonitor, setHeartMonitor] = useState(false);
     const [lastHeartRate, setLastHeartRate] = useState<number | null>(null);
+    const [isSimulated, setIsSimulated] = useState(false);
+    const [simHeartRate, setSimHeartRate] = useState(72);
+    const [simGestureActive, setSimGestureActive] = useState<string | null>(null);
+    const [simCountdown, setSimCountdown] = useState(0);
     const bleManagerRef = useRef<any>(null);
     const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const simHeartRef = useRef<NodeJS.Timeout | null>(null);
+    const simCountRef = useRef<NodeJS.Timeout | null>(null);
+    const watchPulse = useRef(new Animated.Value(1)).current;
 
     useEffect(() => {
         initBLE();
         return () => {
             if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+            if (simHeartRef.current) clearInterval(simHeartRef.current);
+            if (simCountRef.current) clearInterval(simCountRef.current);
             disconnectDevice();
         };
     }, []);
@@ -123,11 +132,74 @@ export default function SmartWatchScreen({ navigation }: any) {
             }
         }
 
-        // Simulation
+        // Fallback simulation
         setIsConnected(true);
         setConnectedDevice(device);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert("⌚ Connected!", `Paired with ${device.name} (simulated)`);
+    };
+
+    // ===== SIMULATED WATCH =====
+    const connectSimulatedWatch = () => {
+        setIsSimulated(true);
+        setIsConnected(true);
+        setConnectedDevice({ id: "sim-watch-001", name: "SafeGuard Watch (Simulated)", rssi: -45 });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+        // Pulse animation
+        Animated.loop(
+            Animated.sequence([
+                Animated.timing(watchPulse, { toValue: 1.05, duration: 1000, useNativeDriver: true }),
+                Animated.timing(watchPulse, { toValue: 1, duration: 1000, useNativeDriver: true }),
+            ])
+        ).start();
+
+        // Simulate heart rate
+        simHeartRef.current = setInterval(() => {
+            setSimHeartRate((prev) => {
+                const change = Math.floor(Math.random() * 5) - 2;
+                return Math.max(60, Math.min(100, prev + change));
+            });
+        }, 2000);
+    };
+
+    const simulateGesture = (gestureId: string) => {
+        setSimGestureActive(gestureId);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        Vibration.vibrate([0, 200, 100, 200]);
+
+        // 3-second countdown before SOS
+        setSimCountdown(3);
+        let count = 3;
+        simCountRef.current = setInterval(() => {
+            count--;
+            setSimCountdown(count);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            if (count <= 0) {
+                if (simCountRef.current) clearInterval(simCountRef.current);
+                setSimGestureActive(null);
+                setSimCountdown(0);
+                // Spike heart rate for effect
+                setSimHeartRate(156);
+                setTimeout(() => setSimHeartRate(72), 5000);
+                handleWatchSOS();
+            }
+        }, 1000);
+    };
+
+    const cancelSimGesture = () => {
+        if (simCountRef.current) clearInterval(simCountRef.current);
+        setSimGestureActive(null);
+        setSimCountdown(0);
+    };
+
+    const disconnectSimWatch = () => {
+        if (simHeartRef.current) clearInterval(simHeartRef.current);
+        if (simCountRef.current) clearInterval(simCountRef.current);
+        setIsSimulated(false);
+        setIsConnected(false);
+        setConnectedDevice(null);
+        watchPulse.setValue(1);
     };
 
     const monitorWatchNotifications = async (device: any) => {
@@ -240,6 +312,18 @@ export default function SmartWatchScreen({ navigation }: any) {
                             </LinearGradient>
                         </TouchableOpacity>
 
+                        {/* Simulated Watch Option */}
+                        <TouchableOpacity onPress={connectSimulatedWatch} activeOpacity={0.8} style={styles.simBtnWrapper}>
+                            <View style={styles.simBtn}>
+                                <MaterialIcons name="devices" size={22} color={colors.smartWatch} />
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.simBtnText}>Use Simulated Watch</Text>
+                                    <Text style={styles.simBtnSub}>Demo mode — no physical device needed</Text>
+                                </View>
+                                <MaterialIcons name="arrow-forward-ios" size={14} color={colors.lightText} />
+                            </View>
+                        </TouchableOpacity>
+
                         {/* Discovered Devices */}
                         {devices.length > 0 && (
                             <>
@@ -262,8 +346,71 @@ export default function SmartWatchScreen({ navigation }: any) {
                             </>
                         )}
                     </>
+                ) : isSimulated ? (
+                    <>
+                        {/* ========== SIMULATED WATCH UI ========== */}
+                        <Animated.View style={[styles.simWatchFace, { transform: [{ scale: watchPulse }] }]}>
+                            <LinearGradient colors={["#1F1B3D", "#0F0D1F"]} style={styles.simWatchInner}>
+                                <Text style={styles.simWatchTime}>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                                <View style={styles.simWatchHR}>
+                                    <MaterialIcons name="favorite" size={16} color="#EF4444" />
+                                    <Text style={[styles.simWatchHRText, simHeartRate > 140 && { color: colors.danger }]}>{simHeartRate} BPM</Text>
+                                </View>
+                                <Text style={styles.simWatchLabel}>SafeGuard Watch</Text>
+                                {simGestureActive && (
+                                    <View style={styles.simCountdownBadge}>
+                                        <Text style={styles.simCountdownText}>SOS in {simCountdown}s</Text>
+                                    </View>
+                                )}
+                            </LinearGradient>
+                        </Animated.View>
+
+                        <View style={styles.simDemoBadge}>
+                            <MaterialIcons name="info" size={14} color={colors.info} />
+                            <Text style={styles.simDemoText}>DEMO MODE — Tap a gesture to simulate SOS trigger</Text>
+                        </View>
+
+                        {/* Simulated Gestures — tap to trigger */}
+                        <Text style={styles.sectionLabel}>Simulate Gesture</Text>
+                        {GESTURES.map((g) => (
+                            <TouchableOpacity
+                                key={g.id}
+                                style={[styles.gestureCard, simGestureActive === g.id && { borderColor: colors.danger, backgroundColor: colors.danger + "08" }]}
+                                onPress={() => simGestureActive ? cancelSimGesture() : simulateGesture(g.id)}
+                                activeOpacity={0.7}
+                            >
+                                <View style={[styles.gestureIcon, simGestureActive === g.id ? { backgroundColor: colors.danger + "20" } : { backgroundColor: colors.smartWatch + "15" }]}>
+                                    <MaterialIcons name={g.icon} size={22} color={simGestureActive === g.id ? colors.danger : colors.smartWatch} />
+                                </View>
+                                <View style={styles.gestureInfo}>
+                                    <Text style={[styles.gestureName, simGestureActive === g.id && { color: colors.danger }]}>{g.name}</Text>
+                                    <Text style={styles.gestureDesc}>{simGestureActive === g.id ? `⏱ SOS triggering in ${simCountdown}s... Tap to cancel` : g.desc}</Text>
+                                </View>
+                                {simGestureActive === g.id ? (
+                                    <View style={styles.simCountdownCircle}>
+                                        <Text style={styles.simCountdownCircleText}>{simCountdown}</Text>
+                                    </View>
+                                ) : (
+                                    <MaterialIcons name="play-arrow" size={22} color={colors.smartWatch} />
+                                )}
+                            </TouchableOpacity>
+                        ))}
+
+                        {/* Quick SOS */}
+                        <TouchableOpacity onPress={handleWatchSOS} activeOpacity={0.8} style={styles.connectWrapper}>
+                            <LinearGradient colors={[colors.danger, "#B91C1C"]} style={styles.connectBtn}>
+                                <MaterialIcons name="sos" size={22} color={colors.white} />
+                                <Text style={styles.connectBtnText}>Instant SOS from Watch</Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity onPress={disconnectSimWatch} style={styles.disconnectBtn}>
+                            <Text style={styles.disconnectText}>Disconnect Simulated Watch</Text>
+                        </TouchableOpacity>
+                    </>
                 ) : (
                     <>
+                        {/* ========== REAL WATCH CONNECTED UI ========== */}
                         {/* Gesture Selection */}
                         <Text style={styles.sectionLabel}>SOS Gesture</Text>
                         {GESTURES.map((g) => (
@@ -373,4 +520,25 @@ const styles = StyleSheet.create({
 
     disconnectBtn: { alignItems: "center", paddingVertical: 16, marginTop: 8 },
     disconnectText: { color: colors.danger, fontSize: 14, fontWeight: "700" },
+
+    // Simulated Watch styles
+    simBtnWrapper: { marginTop: 12 },
+    simBtn: { flexDirection: "row", alignItems: "center", backgroundColor: colors.surface, padding: 16, borderRadius: 14, borderWidth: 1.5, borderColor: colors.smartWatch + "40", borderStyle: "dashed", gap: 12 },
+    simBtnText: { fontSize: 15, fontWeight: "700", color: colors.text },
+    simBtnSub: { fontSize: 11, color: colors.lightText, marginTop: 2 },
+
+    simWatchFace: { alignSelf: "center", marginVertical: 16 },
+    simWatchInner: { width: 180, height: 180, borderRadius: 90, justifyContent: "center", alignItems: "center", borderWidth: 4, borderColor: colors.smartWatch + "50", shadowColor: colors.smartWatch, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 15, elevation: 10 },
+    simWatchTime: { fontSize: 32, fontWeight: "900", color: colors.white, fontFamily: "monospace" },
+    simWatchHR: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 6 },
+    simWatchHRText: { fontSize: 14, fontWeight: "700", color: colors.secondary },
+    simWatchLabel: { fontSize: 10, color: colors.lightText, marginTop: 8, fontWeight: "600", letterSpacing: 1 },
+    simCountdownBadge: { position: "absolute", bottom: 20, backgroundColor: colors.danger, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10 },
+    simCountdownText: { fontSize: 12, fontWeight: "800", color: colors.white },
+
+    simDemoBadge: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, backgroundColor: colors.info + "10", borderRadius: 10, marginBottom: 4 },
+    simDemoText: { fontSize: 10, fontWeight: "700", color: colors.info, letterSpacing: 0.5 },
+
+    simCountdownCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.danger, justifyContent: "center", alignItems: "center" },
+    simCountdownCircleText: { fontSize: 16, fontWeight: "900", color: colors.white },
 });

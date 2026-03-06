@@ -38,6 +38,8 @@ import SmartWatchScreen from "../screens/SmartWatchScreen";
 import OfflineSOSScreen from "../screens/OfflineSOSScreen";
 import EvidenceRecordingScreen from "../screens/EvidenceRecordingScreen";
 import PresetRecordingsScreen from "../screens/PresetRecordingsScreen";
+import SafetyTipsScreen from "../screens/SafetyTipsScreen";
+import GeoFencingScreen from "../screens/GeoFencingScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -114,6 +116,10 @@ export default function AppNavigator() {
                 <Stack.Screen name="EvidenceRecording" component={EvidenceRecordingScreen} />
 
                 <Stack.Screen name="PresetRecordings" component={PresetRecordingsScreen} />
+
+                <Stack.Screen name="SafetyTips" component={SafetyTipsScreen} />
+
+                <Stack.Screen name="GeoFencing" component={GeoFencingScreen} />
 
             </Stack.Navigator>
         </NavigationContainer>

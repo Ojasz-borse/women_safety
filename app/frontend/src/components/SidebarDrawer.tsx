@@ -35,6 +35,8 @@ const FEATURES: FeatureItem[] = [
     { icon: "videocam", label: "Evidence Recorder", screen: "EvidenceRecording", color: colors.evidence, description: "Auto-record evidence" },
     { icon: "timer", label: "Safety Timer", screen: "SafetyTimer", color: colors.safetyTimer, description: "Timed check-ins" },
     { icon: "audiotrack", label: "Safety Recordings", screen: "PresetRecordings", color: colors.accent, description: "Pre-set call recordings" },
+    { icon: "lightbulb", label: "Safety Tips", screen: "SafetyTips", color: "#F59E0B", description: "Essential safety advice" },
+    { icon: "fence", label: "Geo-Fencing", screen: "GeoFencing", color: "#06B6D4", description: "Safe zone boundary alerts" },
 ];
 
 const QUICK_LINKS: FeatureItem[] = [

@@ -7,14 +7,16 @@ const sosSchema = new mongoose.Schema({
     required: true
   },
   location: {
-    latitude: { 
-        type: Number, 
-        required: true },
-    longitude: {  
-        type: Number,
-         required: true },
-    address: { 
-        type: String 
+    latitude: {
+      type: Number,
+      required: true
+    },
+    longitude: {
+      type: Number,
+      required: true
+    },
+    address: {
+      type: String
     }
   },
   status: {
@@ -22,10 +24,10 @@ const sosSchema = new mongoose.Schema({
     enum: ['active', 'resolved', 'cancelled'],
     default: 'active'
   },
-  triggerType: { 
-    type: String, 
-    enum: ['manual', 'shake', 'timer'], 
-    default: 'manual' 
+  triggerType: {
+    type: String,
+    enum: ['manual', 'shake', 'timer', 'voice', 'auto'],
+    default: 'manual'
   },
   notifiedContacts: [{
     name: String,
