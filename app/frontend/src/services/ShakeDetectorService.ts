@@ -1,7 +1,7 @@
 import { Accelerometer } from 'expo-sensors';
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
-import { Platform, Alert, Linking } from 'react-native';
+import { Platform, Alert, Linking, Vibration } from 'react-native';
 import * as Location from 'expo-location';
 import { triggerSOS } from './sosService';
 
@@ -46,11 +46,13 @@ class ShakeDetectorService {
     // Set update interval (200ms for responsive detection)
     Accelerometer.setUpdateInterval(200);
 
+    console.log('🎯 Starting accelerometer with threshold:', SHAKE_THRESHOLD);
+
     this.accelerometerSubscription = Accelerometer.addListener((data) => {
       this.handleAcceleration(data.x, data.y, data.z);
     });
 
-    console.log('✅ Shake detector started');
+    console.log('✅ Shake detector started - listening for shakes...');
   }
 
   // Stop listening
@@ -70,6 +72,11 @@ class ShakeDetectorService {
   // Handle acceleration data
   private handleAcceleration(x: number, y: number, z: number) {
     const acceleration = Math.sqrt(x * x + y * y + z * z);
+    
+    // Log high acceleration values for debugging
+    if (acceleration > 2.0) {
+      console.log(`📊 Acceleration: ${acceleration.toFixed(2)}G - [${x.toFixed(2)}, ${y.toFixed(2)}, ${z.toFixed(2)}]`);
+    }
 
     if (acceleration > SHAKE_THRESHOLD) {
       const now = Date.now();
@@ -79,19 +86,22 @@ class ShakeDetectorService {
         this.lastShakeTime = now;
         this.shakeCount++;
 
-        console.log(`📳 Shake detected: ${this.shakeCount}/3`);
+        console.log(`📳 SHAKE DETECTED! Count: ${this.shakeCount}/3`);
+        
+        // Vibrate on each shake detected
+        Vibration.vibrate(50);
 
         // Reset shake count after window expires
         setTimeout(() => {
           if (this.shakeCount > 0) {
-            console.log('⏰ Shake window expired, resetting');
+            console.log('⏰ Shake window expired, resetting count');
             this.shakeCount = 0;
           }
         }, SHAKE_WINDOW_MS);
 
         // Trigger SOS on 3 shakes
         if (this.shakeCount >= 3) {
-          console.log('🚨 3 shakes detected! Triggering SOS...');
+          console.log('🚨 3 SHAKES DETECTED! TRIGGERING SOS NOW!');
           this.shakeCount = 0;
           if (this.onShakeDetected) {
             this.onShakeDetected();

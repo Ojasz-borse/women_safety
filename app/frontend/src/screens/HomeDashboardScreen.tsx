@@ -72,11 +72,58 @@ export default function HomeDashboardScreen({ navigation }: any) {
             Animated.timing(glowAnim, { toValue: 1, duration: 3000, easing: Easing.linear, useNativeDriver: true })
         ).start();
 
-        // Initialize background shake detection
-        initShakeDetection();
-
         return () => {
             // Cleanup handled by shakeDetectorService
+        };
+    }, []);
+
+    // Initialize shake detection after component mounts
+    useEffect(() => {
+        console.log('🎯 Setting up shake detection...');
+        
+        const setupShakeDetection = async () => {
+            try {
+                // Small delay to ensure component is fully mounted
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Request background fetch permissions (iOS)
+                if (Platform.OS === 'ios') {
+                    try {
+                        const status = await BackgroundFetch.getStatusAsync();
+                        if (status === BackgroundFetch.Status.Available) {
+                            await shakeDetectorService.initBackgroundTask();
+                            console.log('✅ iOS background task registered');
+                        } else {
+                            console.log('⚠️ iOS background fetch status:', status);
+                        }
+                    } catch (iosError) {
+                        console.log('⚠️ iOS background setup error:', iosError);
+                    }
+                }
+
+                // Start shake detection
+                shakeDetectorService.start(() => {
+                    console.log('🚨 SHAKE TRIGGER CALLBACK FIRED!');
+                    handleSOSFromShake();
+                });
+
+                console.log('✅ Shake detection ACTIVE - shake your phone 3 times!');
+                
+                // Log status after 2 seconds
+                setTimeout(() => {
+                    console.log('📊 Shake detector status:', shakeDetectorService.isRunning());
+                }, 2000);
+            } catch (error) {
+                console.error('❌ Shake detection setup failed:', error);
+            }
+        };
+
+        setupShakeDetection();
+
+        // Cleanup on unmount
+        return () => {
+            console.log('🛑 Stopping shake detection');
+            shakeDetectorService.stop();
         };
     }, []);
 
@@ -91,32 +138,6 @@ export default function HomeDashboardScreen({ navigation }: any) {
         };
         loadUser();
     }, []);
-
-    // Initialize shake detection that works in background/lock screen
-    const initShakeDetection = async () => {
-        try {
-            // Request background fetch permissions (iOS)
-            if (Platform.OS === 'ios') {
-                const status = await BackgroundFetch.getStatusAsync();
-                if (status === BackgroundFetch.Status.Denied) {
-                    console.log('⚠️ Background fetch not available');
-                } else {
-                    await shakeDetectorService.initBackgroundTask();
-                }
-            }
-
-            // Start shake detection
-            shakeDetectorService.start(() => {
-                // This callback runs when 3 shakes are detected
-                console.log('🚨 Shake detector triggered SOS!');
-                handleSOSFromShake();
-            });
-
-            console.log('✅ Shake detection initialized');
-        } catch (error) {
-            console.log('❌ Failed to initialize shake detection:', error);
-        }
-    };
 
     // Handle SOS triggered from shake (simplified, no confirmation dialog)
     const handleSOSFromShake = async () => {
