@@ -40,6 +40,7 @@ import EvidenceRecordingScreen from "../screens/EvidenceRecordingScreen";
 import PresetRecordingsScreen from "../screens/PresetRecordingsScreen";
 import SafetyTipsScreen from "../screens/SafetyTipsScreen";
 import GeoFencingScreen from "../screens/GeoFencingScreen";
+import CollaborationScreen from "../screens/CollaborationScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -120,6 +121,8 @@ export default function AppNavigator() {
                 <Stack.Screen name="SafetyTips" component={SafetyTipsScreen} />
 
                 <Stack.Screen name="GeoFencing" component={GeoFencingScreen} />
+
+                <Stack.Screen name="Collaboration" component={CollaborationScreen} />
 
             </Stack.Navigator>
         </NavigationContainer>

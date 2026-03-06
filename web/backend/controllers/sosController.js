@@ -56,14 +56,30 @@ const sendEmergencyEmail = async (toEmail, userName, mapLink, address, triggerTy
 
 /**
  * SHARED LOGIC: Internal function for API and Cron Job
+ * If includeCollaborator is true, also sends to collaborator's contacts
  */
-exports.triggerSOSLogic = async (userId, latitude = 0, longitude = 0, address = 'Location unavailable', triggerType = 'manual') => {
-    const user = await User.findById(userId);
+exports.triggerSOSLogic = async (userId, latitude = 0, longitude = 0, address = 'Location unavailable', triggerType = 'manual', includeCollaborator = true) => {
+    const user = await User.findById(userId).populate('collaborator', 'name email emergencyContacts');
     if (!user) {
         throw new Error("User not found.");
     }
     if (!user.emergencyContacts || user.emergencyContacts.length === 0) {
         throw new Error("No emergency contacts found. Add contacts first.");
+    }
+
+    // Get merged contacts (user + collaborator if exists)
+    let allContacts = [...user.emergencyContacts];
+    let hasCollaborator = false;
+    
+    if (includeCollaborator && user.collaborator && user.collaborator.emergencyContacts && user.collaborator.emergencyContacts.length > 0) {
+        hasCollaborator = true;
+        // Add collaborator's contacts (avoid duplicates by phone)
+        user.collaborator.emergencyContacts.forEach(contact => {
+            const exists = allContacts.find(c => c.phone === contact.phone);
+            if (!exists) {
+                allContacts.push(contact);
+            }
+        });
     }
 
     const mapLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
@@ -72,7 +88,7 @@ exports.triggerSOSLogic = async (userId, latitude = 0, longitude = 0, address = 
     const notificationResults = [];
 
     // Method 1: Try Twilio SMS
-    for (const contact of user.emergencyContacts) {
+    for (const contact of allContacts) {
         let smsSent = false;
 
         if (twilioClient && process.env.TWILIO_PHONE_NUMBER) {
@@ -111,7 +127,7 @@ exports.triggerSOSLogic = async (userId, latitude = 0, longitude = 0, address = 
     }
 
     const sentCount = notificationResults.filter(r => r.status === 'sms_sent' || r.status === 'email_sent').length;
-    console.log(`SOS notifications: ${sentCount}/${user.emergencyContacts.length} delivered`);
+    console.log(`SOS notifications: ${sentCount}/${allContacts.length} delivered (contacts: ${user.emergencyContacts.length}${hasCollaborator ? ' + collaborator' : ''})`);
 
     // Always create the SOS record
     const sosAlert = await SOS.create({
@@ -126,8 +142,9 @@ exports.triggerSOSLogic = async (userId, latitude = 0, longitude = 0, address = 
         _id: sosAlert._id,
         alertId: sosAlert._id,
         smsSentCount: sentCount,
-        smsTotalCount: user.emergencyContacts.length,
-        success: true
+        smsTotalCount: allContacts.length,
+        success: true,
+        hasCollaborator
     };
 };
 

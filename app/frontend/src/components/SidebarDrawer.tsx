@@ -37,6 +37,7 @@ const FEATURES: FeatureItem[] = [
     { icon: "audiotrack", label: "Safety Recordings", screen: "PresetRecordings", color: colors.accent, description: "Pre-set call recordings" },
     { icon: "lightbulb", label: "Safety Tips", screen: "SafetyTips", color: "#F59E0B", description: "Essential safety advice" },
     { icon: "fence", label: "Geo-Fencing", screen: "GeoFencing", color: "#06B6D4", description: "Safe zone boundary alerts" },
+    { icon: "people", label: "Collaboration", screen: "Collaboration", color: colors.success, description: "Sync emergency contacts" },
 ];
 
 const QUICK_LINKS: FeatureItem[] = [

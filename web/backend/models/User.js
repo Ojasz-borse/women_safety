@@ -62,6 +62,21 @@ const userSchema = new mongoose.Schema(
         relation: { type: String }
       }
     ],
+
+    // Collaboration feature - link to another user
+    collaborator: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null
+    },
+    // Collaboration invite - pending invitation from another user
+    collaborationInvite: {
+      from: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      expiresAt: Date
+    }
   },
 
   {

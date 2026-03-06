@@ -43,6 +43,8 @@ const contactRoutes = require('./routes/contactRoutes.js');
 app.use('/api/contacts', contactRoutes);
 const evidenceRoutes = require('./routes/evidenceRoutes');
 app.use('/api/evidence', evidenceRoutes);
+const collaborationRoutes = require('./routes/collaborationRoutes');
+app.use('/api/collaboration', collaborationRoutes);
 // const { triggerSOSLogic } = require('./controllers/sosController');
 
 cron.schedule('* * * * *', async () => {
