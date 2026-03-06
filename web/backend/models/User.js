@@ -31,43 +31,54 @@ const userSchema = new mongoose.Schema(
       required: true,
     },
     // --- OTP & Verification ---
-    otp: { 
-        type: String
+    otp: {
+      type: String
     },
     otpExpire: {
-         type: Date 
+      type: Date
     },
     isVerified: {
-        type: Boolean,
-        default: false
+      type: Boolean,
+      default: false
     },
     // --- Password Reset ---
-    resetPasswordToken: { 
-        type: String
+    resetPasswordToken: {
+      type: String
     },
     resetPasswordExpire: {
-         type: Date 
+      type: Date
     },
 
-safetyTimer: {
-    isActive: { type: Boolean, default: false },
-    expiryTime: { type: Date },
-    timerDuration: { type: Number } 
-},safetyTimer: {
-    isActive: { type: Boolean, default: false },
-    expiryTime: { type: Date },
-    duration: { type: Number } // Minutes
-},
+    safetyTimer: {
+      isActive: { type: Boolean, default: false },
+      expiryTime: { type: Date },
+      duration: { type: Number }
+    },
 
     emergencyContacts: [
       {
         name: { type: String, required: true },
         phone: { type: String, required: true },
-        relation: { type: String } 
+        relation: { type: String }
       }
     ],
+
+    // Collaboration feature - link to another user
+    collaborator: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null
+    },
+    // Collaboration invite - pending invitation from another user
+    collaborationInvite: {
+      from: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      expiresAt: Date
+    }
   },
-  
+
   {
     timestamps: true, // This automatically adds createdAt and updatedAt
   }

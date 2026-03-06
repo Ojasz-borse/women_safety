@@ -30,9 +30,9 @@ const serviceRoutes = require('./routes/serviceRoutes');
 app.use('/api/services', serviceRoutes);
 const result = require('dotenv').config();
 if (result.error) {
-  console.log("❌ .env file not found!");
+    console.log("❌ .env file not found!");
 } else {
-  console.log("✅ .env variables loaded:", Object.keys(result.parsed));
+    console.log("✅ .env variables loaded:", Object.keys(result.parsed));
 }
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
@@ -41,11 +41,15 @@ const incidentRoutes = require('./routes/incidentRoutes');
 app.use('/api/incidents', incidentRoutes);
 const contactRoutes = require('./routes/contactRoutes.js');
 app.use('/api/contacts', contactRoutes);
+const evidenceRoutes = require('./routes/evidenceRoutes');
+app.use('/api/evidence', evidenceRoutes);
+const collaborationRoutes = require('./routes/collaborationRoutes');
+app.use('/api/collaboration', collaborationRoutes);
 // const { triggerSOSLogic } = require('./controllers/sosController');
 
 cron.schedule('* * * * *', async () => {
     console.log("Checking for expired safety timers...");
-    
+
     const expiredUsers = await User.find({
         'safetyTimer.isActive': true,
         'safetyTimer.expiryTime': { $lte: new Date() }
@@ -54,9 +58,9 @@ cron.schedule('* * * * *', async () => {
     for (let user of expiredUsers) {
         try {
             console.log(`🚨 Auto-SOS triggered for ${user.name}`);
-            
+
             // Call the exported function
-            await triggerSOSLogic(user._id); 
+            await triggerSOSLogic(user._id);
 
             user.safetyTimer.isActive = false;
             await user.save();
