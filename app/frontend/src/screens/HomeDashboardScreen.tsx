@@ -81,49 +81,62 @@ export default function HomeDashboardScreen({ navigation }: any) {
     useEffect(() => {
         console.log('🎯 Setting up shake detection...');
         
-        const setupShakeDetection = async () => {
-            try {
-                // Small delay to ensure component is fully mounted
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                
-                // Request background fetch permissions (iOS)
-                if (Platform.OS === 'ios') {
-                    try {
-                        const status = await BackgroundFetch.getStatusAsync();
-                        if (status === BackgroundFetch.Status.Available) {
-                            await shakeDetectorService.initBackgroundTask();
-                            console.log('✅ iOS background task registered');
-                        } else {
-                            console.log('⚠️ iOS background fetch status:', status);
-                        }
-                    } catch (iosError) {
-                        console.log('⚠️ iOS background setup error:', iosError);
+        // Set accelerometer update interval
+        Accelerometer.setUpdateInterval(100); // 100ms = more responsive
+        
+        const subscription = Accelerometer.addListener((data) => {
+            const { x, y, z } = data;
+            const acceleration = Math.sqrt(x * x + y * y + z * z);
+            
+            // Log all acceleration for debugging
+            if (acceleration > 1.5) {
+                console.log(`📊 G-Force: ${acceleration.toFixed(2)} [${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)}]`);
+            }
+            
+            // Lower threshold for easier detection (1.8G instead of 2.5G)
+            if (acceleration > 1.8) {
+                const now = Date.now();
+                if (now - lastShake.current > 400) { // Reduced from 500ms
+                    lastShake.current = now;
+                    shakeCount.current += 1;
+                    
+                    console.log(`📳 SHAKE ${shakeCount.current}/3 detected!`);
+                    
+                    // Vibrate on shake
+                    if (Platform.OS === 'android') {
+                        require('react-native').Vibration.vibrate(30);
+                    }
+
+                    // Reset after 2.5 seconds
+                    if (shakeTimer.current) clearTimeout(shakeTimer.current);
+                    shakeTimer.current = setTimeout(() => {
+                        console.log('⏰ Resetting shake count');
+                        shakeCount.current = 0;
+                    }, 2500);
+
+                    // TRIGGER SOS on 3 shakes
+                    if (shakeCount.current >= 3) {
+                        shakeCount.current = 0;
+                        if (shakeTimer.current) clearTimeout(shakeTimer.current);
+                        console.log('🚨🚨🚨 3 SHAKES - SOS TRIGGERED! 🚨🚨🚨');
+                        handleSOSFromShake();
                     }
                 }
-
-                // Start shake detection
-                shakeDetectorService.start(() => {
-                    console.log('🚨 SHAKE TRIGGER CALLBACK FIRED!');
-                    handleSOSFromShake();
-                });
-
-                console.log('✅ Shake detection ACTIVE - shake your phone 3 times!');
-                
-                // Log status after 2 seconds
-                setTimeout(() => {
-                    console.log('📊 Shake detector status:', shakeDetectorService.isRunning());
-                }, 2000);
-            } catch (error) {
-                console.error('❌ Shake detection setup failed:', error);
             }
-        };
+        });
 
-        setupShakeDetection();
+        console.log('✅ Shake detection ACTIVE - shake your phone 3 times!');
+        
+        // Test log after 2 seconds
+        setTimeout(() => {
+            console.log('📊 Shake detector listening... (try shaking now)');
+        }, 2000);
 
-        // Cleanup on unmount
+        // Cleanup
         return () => {
             console.log('🛑 Stopping shake detection');
-            shakeDetectorService.stop();
+            if (shakeTimer.current) clearTimeout(shakeTimer.current);
+            subscription.remove();
         };
     }, []);
 
