@@ -6,17 +6,13 @@ import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import { colors } from "../theme/colors";
-import { uploadEvidence as apiUploadEvidence, getEvidenceList as apiGetEvidenceList, deleteEvidence as apiDeleteEvidence } from "../services/evidenceService";
 
 type EvidenceItem = {
     id: string;
-    _id?: string; // Backend ID
     type: string;
     duration: number;
     date: string;
     uri: string;
-    uploading?: boolean;
-    uploaded?: boolean;
 };
 
 // Lazy getter — only evaluates when called, never at module load
@@ -41,24 +37,11 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
 
     useEffect(() => {
         initStorage();
-        loadEvidenceFromBackend();
         return () => {
             if (soundRef.current) soundRef.current.unloadAsync();
             if (timerRef.current) clearInterval(timerRef.current);
         };
     }, []);
-
-    const loadEvidenceFromBackend = async () => {
-        try {
-            const response = await apiGetEvidenceList();
-            if (response.success && response.data && response.data.length > 0) {
-                console.log("Loaded evidence from backend:", response.data.length);
-                // Backend evidence is already in state format, no need to merge
-            }
-        } catch (error: any) {
-            console.log("Failed to load evidence from backend:", error.message || error);
-        }
-    };
 
     useEffect(() => {
         if (isRecording) {
@@ -200,62 +183,14 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
                     duration,
                     date: new Date().toLocaleString(),
                     uri: permanentUri,
-                    uploading: true,
-                    uploaded: false,
                 };
 
                 const updated = [newRec, ...recordings];
                 setRecordings(updated);
                 await saveMetadata(updated);
 
-                // Upload to backend
-                try {
-                    console.log("Starting upload to backend...");
-                    const uploadResult = await apiUploadEvidence(
-                        permanentUri,
-                        recordingType,
-                        duration
-                    );
-                    console.log("Upload successful:", uploadResult);
-
-                    // Update recording with backend ID
-                    const updatedRec = {
-                        ...newRec,
-                        _id: uploadResult.data._id,
-                        uploading: false,
-                        uploaded: true,
-                    };
-
-                    const finalUpdated = recordings.map((r) =>
-                        r.id === newRec.id ? updatedRec : r
-                    );
-                    setRecordings(finalUpdated);
-                    await saveMetadata(finalUpdated);
-
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                    Alert.alert(
-                        "✅ Evidence Saved & Uploaded!",
-                        `Recording saved locally and uploaded to server (${formatTime(duration)}).`
-                    );
-                } catch (uploadError: any) {
-                    console.log("Upload failed, but local save succeeded:", uploadError);
-                    // Mark as not uploaded but keep local copy
-                    const updatedRec = {
-                        ...newRec,
-                        uploading: false,
-                        uploaded: false,
-                    };
-                    const finalUpdated = recordings.map((r) =>
-                        r.id === newRec.id ? updatedRec : r
-                    );
-                    setRecordings(finalUpdated);
-                    await saveMetadata(finalUpdated);
-
-                    Alert.alert(
-                        "⚠️ Saved Locally",
-                        "Recording saved on device but upload failed. Will retry later."
-                    );
-                }
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                Alert.alert("✅ Evidence Saved!", `Recording saved permanently (${formatTime(duration)}). It will persist across app restarts.`);
             }
 
             recordingRef.current = null;
@@ -324,26 +259,14 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
     };
 
     const deleteRecording = (rec: EvidenceItem) => {
-        Alert.alert("Delete Evidence", "This will permanently delete this recording from device and server. Continue?", [
+        Alert.alert("Delete Evidence", "This will permanently delete this recording. Continue?", [
             { text: "Cancel", style: "cancel" },
             {
                 text: "Delete",
                 style: "destructive",
                 onPress: async () => {
                     try {
-                        // Delete from device
                         await FileSystem.deleteAsync(rec.uri, { idempotent: true });
-                        
-                        // Delete from backend if uploaded
-                        if (rec._id) {
-                            try {
-                                await apiDeleteEvidence(rec._id);
-                                console.log("Deleted from backend:", rec._id);
-                            } catch (err) {
-                                console.log("Backend delete failed:", err);
-                            }
-                        }
-                        
                         const updated = recordings.filter((r) => r.id !== rec.id);
                         setRecordings(updated);
                         await saveMetadata(updated);
@@ -436,15 +359,6 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
                             <View style={styles.recInfo}>
                                 <Text style={styles.recTitle}>{rec.type === "audio" ? "Audio" : "Video"} Evidence</Text>
                                 <Text style={styles.recMeta}>{formatTime(rec.duration)} • {rec.date}</Text>
-                                {rec.uploading && (
-                                    <Text style={styles.uploadStatus}>⏳ Uploading to server...</Text>
-                                )}
-                                {rec.uploaded && (
-                                    <Text style={styles.uploadStatusSuccess}>✅ Uploaded to server</Text>
-                                )}
-                                {rec.uploaded === false && !rec.uploading && (
-                                    <Text style={styles.uploadStatusError}>⚠️ Not uploaded (tap to retry)</Text>
-                                )}
                             </View>
                             <TouchableOpacity
                                 onPress={() => playRecording(rec)}
@@ -465,9 +379,9 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
 
                 {/* Info */}
                 <View style={styles.infoCard}>
-                    <MaterialIcons name="cloud-upload" size={18} color={colors.info} />
+                    <MaterialIcons name="security" size={18} color={colors.info} />
                     <Text style={styles.infoText}>
-                        Recordings are saved on your device and automatically uploaded to the secure server. They persist across app restarts and can be used as evidence.
+                        Recordings are saved permanently on your device in the app's secure storage. They persist across app restarts and can be used as evidence.
                     </Text>
                 </View>
 
@@ -511,9 +425,6 @@ const styles = StyleSheet.create({
     recTitle: { fontSize: 14, fontWeight: "700", color: colors.text },
     recMeta: { fontSize: 11, color: colors.lightText, marginTop: 2 },
     playBtn: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center" },
-    uploadStatus: { fontSize: 10, color: colors.lightText, marginTop: 3, fontStyle: "italic" },
-    uploadStatusSuccess: { fontSize: 10, color: colors.success, marginTop: 3, fontWeight: "600" },
-    uploadStatusError: { fontSize: 10, color: colors.danger, marginTop: 3, fontWeight: "600" },
 
     infoCard: { flexDirection: "row", backgroundColor: colors.surface, padding: 14, borderRadius: 12, marginTop: 16, borderWidth: 1, borderColor: colors.border },
     infoText: { flex: 1, marginLeft: 10, fontSize: 12, color: colors.textSecondary, lineHeight: 18 },
