@@ -5,6 +5,7 @@ const sendEmail = require('../utils/sendEmail');
 // @route   POST /api/collaboration/invite
 exports.sendInvite = async (req, res) => {
     try {
+        console.log("🤝 Collaboration invite request:", req.user.id, req.body);
         const { email } = req.body;
 
         if (!email) {
@@ -12,7 +13,7 @@ exports.sendInvite = async (req, res) => {
         }
 
         // Find the user to invite
-        const userToInvite = await User.findOne({ email });
+        const userToInvite = await User.findOne({ email: email.trim().toLowerCase() });
         if (!userToInvite) {
             return res.status(404).json({ success: false, message: "User not found with this email" });
         }
@@ -30,9 +31,9 @@ exports.sendInvite = async (req, res) => {
             return res.status(400).json({ success: false, message: "This user already has a collaborator" });
         }
 
-        // Check if there's already a pending invite
-        if (userToInvite.collaborationInvite) {
-            return res.status(400).json({ success: false, message: "Invite already sent to this user" });
+        // Check if there's already a pending invite (from anyone)
+        if (userToInvite.collaborationInvite && userToInvite.collaborationInvite.expiresAt > new Date()) {
+            return res.status(400).json({ success: false, message: "This user already has a pending invite" });
         }
 
         // Send invite
@@ -41,24 +42,27 @@ exports.sendInvite = async (req, res) => {
             expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
         };
         await userToInvite.save();
+        console.log("✅ Invite saved to database");
 
         // Send email notification
         try {
             await sendEmail({
                 to: email,
-                subject: "Safety App Collaboration Invite",
+                subject: "🚨 Safety App Collaboration Invite",
                 text: `${req.user.name} has invited you to collaborate on the Safety App. When you both accept, each other's emergency contacts will be synced and SOS alerts will be sent to both sets of contacts. Login to the app to accept the invite.`
             });
+            console.log("📧 Email sent to:", email);
         } catch (emailErr) {
-            console.log("Email send failed:", emailErr.message);
+            console.log("📧 Email send failed (non-critical):", emailErr.message);
         }
 
-        res.status(200).json({ 
-            success: true, 
+        res.status(200).json({
+            success: true,
             message: "Collaboration invite sent",
             data: { invitedUser: { id: userToInvite._id, name: userToInvite.name, email: userToInvite.email } }
         });
     } catch (error) {
+        console.error("❌ Collaboration invite error:", error);
         res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -67,22 +71,26 @@ exports.sendInvite = async (req, res) => {
 // @route   POST /api/collaboration/accept
 exports.acceptInvite = async (req, res) => {
     try {
+        console.log("🤝 Accept collaboration request:", req.user.id);
         const user = await User.findById(req.user.id);
 
         if (!user.collaborationInvite) {
+            console.log("❌ No pending invite for user:", req.user.id);
             return res.status(400).json({ success: false, message: "No pending invite" });
         }
 
         // Check if invite is expired
         if (user.collaborationInvite.expiresAt < new Date()) {
+            console.log("❌ Invite expired");
             user.collaborationInvite = undefined;
             await user.save();
             return res.status(400).json({ success: false, message: "Invite has expired" });
         }
 
         // Get the user who sent the invite
-        const inviter = await User.findById(user.collaborationInvite.from);
+        const inviter = await User.findById(user.collaborationInvite.from).select('-password');
         if (!inviter) {
+            console.log("❌ Inviter not found");
             user.collaborationInvite = undefined;
             await user.save();
             return res.status(404).json({ success: false, message: "Inviting user not found" });
@@ -90,12 +98,14 @@ exports.acceptInvite = async (req, res) => {
 
         // Check if inviter still has no collaborator
         if (inviter.collaborator) {
+            console.log("❌ Inviter already has collaborator");
             user.collaborationInvite = undefined;
             await user.save();
             return res.status(400).json({ success: false, message: "This invite is no longer valid" });
         }
 
         // Link both users
+        console.log("✅ Linking users:", user._id, "and", inviter._id);
         user.collaborator = inviter._id;
         user.collaborationInvite = undefined;
         await user.save();
@@ -103,12 +113,14 @@ exports.acceptInvite = async (req, res) => {
         inviter.collaborator = user._id;
         await inviter.save();
 
-        res.status(200).json({ 
-            success: true, 
+        console.log("✅ Collaboration established!");
+        res.status(200).json({
+            success: true,
             message: "Collaboration accepted",
-            data: { collaborator: { id: inviter._id, name: inviter.name, email: inviter.email } }
+            data: { collaborator: { id: inviter._id, name: inviter.name, email: inviter.email, phoneNumber: inviter.phoneNumber } }
         });
     } catch (error) {
+        console.error("❌ Accept collaboration error:", error);
         res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -162,6 +174,11 @@ exports.getCollaborationStatus = async (req, res) => {
             .populate('collaborationInvite.from', 'name email');
 
         const hasInvite = !!user.collaborationInvite && user.collaborationInvite.expiresAt > new Date();
+        
+        console.log("📊 Collaboration status for", req.user.id, ":", {
+            hasCollaborator: !!user.collaborator,
+            hasPendingInvite: hasInvite
+        });
 
         res.status(200).json({
             success: true,
@@ -173,6 +190,7 @@ exports.getCollaborationStatus = async (req, res) => {
             }
         });
     } catch (error) {
+        console.error("❌ Get collaboration status error:", error);
         res.status(500).json({ success: false, message: error.message });
     }
 };

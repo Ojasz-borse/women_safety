@@ -59,6 +59,7 @@ const sendEmergencyEmail = async (toEmail, userName, mapLink, address, triggerTy
  * If includeCollaborator is true, also sends to collaborator's contacts
  */
 exports.triggerSOSLogic = async (userId, latitude = 0, longitude = 0, address = 'Location unavailable', triggerType = 'manual', includeCollaborator = true) => {
+    console.log("🚨 SOS Trigger Logic started for user:", userId);
     const user = await User.findById(userId).populate('collaborator', 'name email emergencyContacts');
     if (!user) {
         throw new Error("User not found.");
@@ -73,6 +74,7 @@ exports.triggerSOSLogic = async (userId, latitude = 0, longitude = 0, address = 
     
     if (includeCollaborator && user.collaborator && user.collaborator.emergencyContacts && user.collaborator.emergencyContacts.length > 0) {
         hasCollaborator = true;
+        console.log("🤝 Collaborator found! Merging contacts...");
         // Add collaborator's contacts (avoid duplicates by phone)
         user.collaborator.emergencyContacts.forEach(contact => {
             const exists = allContacts.find(c => c.phone === contact.phone);
@@ -80,6 +82,9 @@ exports.triggerSOSLogic = async (userId, latitude = 0, longitude = 0, address = 
                 allContacts.push(contact);
             }
         });
+        console.log(`Merged contacts: ${user.emergencyContacts.length} (user) + ${user.collaborator.emergencyContacts.length} (collaborator) = ${allContacts.length} total`);
+    } else {
+        console.log("ℹ️ No collaborator or collaborator has no contacts");
     }
 
     const mapLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
