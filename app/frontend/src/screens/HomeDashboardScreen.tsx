@@ -378,6 +378,17 @@ export default function HomeDashboardScreen({ navigation }: any) {
                         </LinearGradient>
                     </View>
 
+                    {/* DEBUG: Test SOS */}
+                    <TouchableOpacity
+                        style={styles.debugBtn}
+                        onPress={() => {
+                            console.log('🧪 DEBUG: Manual SOS trigger test');
+                            handleSOSFromShake();
+                        }}
+                    >
+                        <Text style={styles.debugBtnText}>🧪 TEST SOS (Click to trigger)</Text>
+                    </TouchableOpacity>
+
                     <View style={{ height: 30 }} />
                 </ScrollView>
             </SafeAreaView>
@@ -474,4 +485,8 @@ const styles = StyleSheet.create({
     tipCard: { borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: colors.border },
     tipGradient: { flexDirection: "row", padding: 16, alignItems: "center" },
     tipText: { marginLeft: 12, flex: 1, fontSize: 13, color: colors.textSecondary, lineHeight: 20, fontWeight: "500" },
+
+    // Debug button
+    debugBtn: { backgroundColor: colors.danger + "20", borderWidth: 2, borderColor: colors.danger, borderStyle: "dashed", borderRadius: 12, paddingVertical: 14, paddingHorizontal: 20, marginTop: 16, alignItems: "center" },
+    debugBtnText: { fontSize: 14, fontWeight: "700", color: colors.danger },
 });
