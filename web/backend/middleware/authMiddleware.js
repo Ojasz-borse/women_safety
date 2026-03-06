@@ -15,24 +15,30 @@ const protect = async (req, res, next) => {
       token = req.headers.authorization.split(' ')[1];
 
       if (!token) {
+        console.log("❌ Auth failed: No token in Authorization header");
         return res.status(401).json({ message: 'Not authorized, no token provided' });
       }
 
+      console.log("🔑 Token received:", token.substring(0, 20) + "...");
+      
       // Verify token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      console.log("✅ Token decoded, user ID:", decoded.id);
 
       // Find user by ID from decoded token (exclude password)
       req.user = await User.findById(decoded.id).select('-password');
 
       // Check if user still exists
       if (!req.user) {
+        console.log("❌ Auth failed: User not found for ID:", decoded.id);
         return res.status(401).json({ message: 'User not found, token may be invalid' });
       }
 
+      console.log("✅ User authenticated:", req.user.email || req.user.name);
       // Proceed to next middleware/route
       return next();
     } catch (error) {
-      console.error("JWT Verification Error:", error.message);
+      console.error("❌ JWT Verification Error:", error.message);
 
       // Handle specific JWT errors
       if (error.name === 'TokenExpiredError') {
@@ -49,10 +55,12 @@ const protect = async (req, res, next) => {
 
   // No token provided
   if (!req.headers.authorization) {
+    console.log("❌ Auth failed: No Authorization header");
     return res.status(401).json({ message: 'Not authorized, no token provided' });
   }
 
   // Authorization header doesn't start with Bearer
+  console.log("❌ Auth failed: Invalid Authorization header format");
   return res.status(401).json({ message: 'Invalid authorization header format' });
 };
 

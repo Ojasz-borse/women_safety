@@ -5,11 +5,22 @@ const path = require('path');
 // @route   POST /api/evidence/upload
 exports.uploadEvidence = async (req, res) => {
     try {
-        const { type, duration, linkedSOS, notes } = req.body;
+        console.log("=== Evidence Upload Request ===");
+        console.log("User:", req.user);
+        console.log("Body:", req.body);
+        console.log("File:", req.file);
+        
+        if (!req.user) {
+            console.log("❌ No user in request - authentication failed");
+            return res.status(401).json({ message: "Authentication required" });
+        }
 
         if (!req.file) {
+            console.log("❌ No file uploaded");
             return res.status(400).json({ message: "No file uploaded" });
         }
+
+        const { type, duration, linkedSOS, notes } = req.body;
 
         const evidence = await Evidence.create({
             user: req.user.id,
@@ -20,11 +31,14 @@ exports.uploadEvidence = async (req, res) => {
             notes: notes || ''
         });
 
+        console.log("✅ Evidence saved:", evidence._id);
         res.status(201).json({
             success: true,
             data: evidence
         });
     } catch (error) {
+        console.error("❌ Upload error:", error.message);
+        console.error("Stack:", error.stack);
         res.status(500).json({ message: "Upload failed", error: error.message });
     }
 };

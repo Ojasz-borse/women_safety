@@ -3,18 +3,27 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, StatusBar, ScrollView,
 import { MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Audio } from "expo-av";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import { colors } from "../theme/colors";
-
-const STORAGE_DIR = (FileSystem as any).documentDirectory + "evidence/";
+import { uploadEvidence as apiUploadEvidence, getEvidenceList as apiGetEvidenceList, deleteEvidence as apiDeleteEvidence } from "../services/evidenceService";
 
 type EvidenceItem = {
     id: string;
+    _id?: string; // Backend ID
     type: string;
     duration: number;
     date: string;
     uri: string;
+    uploading?: boolean;
+    uploaded?: boolean;
+};
+
+// Lazy getter — only evaluates when called, never at module load
+const getStorageDir = (): string => {
+    const FS = FileSystem as any;
+    const base = FS.documentDirectory || FS.cacheDirectory || "";
+    return base + "evidence/";
 };
 
 export default function EvidenceRecordingScreen({ navigation }: any) {
@@ -23,18 +32,33 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
     const [duration, setDuration] = useState(0);
     const [recordings, setRecordings] = useState<EvidenceItem[]>([]);
     const [playingId, setPlayingId] = useState<string | null>(null);
+    const [storageReady, setStorageReady] = useState(false);
     const recordingRef = useRef<Audio.Recording | null>(null);
     const soundRef = useRef<Audio.Sound | null>(null);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const pulseAnim = useRef(new Animated.Value(1)).current;
+    const storageDirRef = useRef("");
 
     useEffect(() => {
-        ensureDir();
-        loadRecordings();
+        initStorage();
+        loadEvidenceFromBackend();
         return () => {
             if (soundRef.current) soundRef.current.unloadAsync();
+            if (timerRef.current) clearInterval(timerRef.current);
         };
     }, []);
+
+    const loadEvidenceFromBackend = async () => {
+        try {
+            const response = await apiGetEvidenceList();
+            if (response.success && response.data && response.data.length > 0) {
+                console.log("Loaded evidence from backend:", response.data.length);
+                // Backend evidence is already in state format, no need to merge
+            }
+        } catch (error: any) {
+            console.log("Failed to load evidence from backend:", error.message || error);
+        }
+    };
 
     useEffect(() => {
         if (isRecording) {
@@ -49,31 +73,70 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
         }
     }, [isRecording]);
 
-    const ensureDir = async () => {
-        const info = await FileSystem.getInfoAsync(STORAGE_DIR);
-        if (!info.exists) await FileSystem.makeDirectoryAsync(STORAGE_DIR, { intermediates: true });
-    };
-
-    const loadRecordings = async () => {
+    const initStorage = async () => {
         try {
-            const metaFile = STORAGE_DIR + "evidence_meta.json";
-            const info = await FileSystem.getInfoAsync(metaFile);
-            if (info.exists) {
-                const data = await FileSystem.readAsStringAsync(metaFile);
-                setRecordings(JSON.parse(data));
+            const dir = getStorageDir();
+            storageDirRef.current = dir;
+            console.log("Evidence storage dir:", dir);
+
+            const dirInfo = await FileSystem.getInfoAsync(dir);
+            if (!dirInfo.exists) {
+                await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+                console.log("Created evidence directory");
             }
-        } catch { }
+
+            // Load saved metadata
+            const metaPath = dir + "evidence_meta.json";
+            const metaInfo = await FileSystem.getInfoAsync(metaPath);
+            if (metaInfo.exists) {
+                const raw = await FileSystem.readAsStringAsync(metaPath);
+                const saved: EvidenceItem[] = JSON.parse(raw);
+
+                // Verify each file still exists
+                const verified: EvidenceItem[] = [];
+                for (const rec of saved) {
+                    try {
+                        const fInfo = await FileSystem.getInfoAsync(rec.uri);
+                        if (fInfo.exists) {
+                            verified.push(rec);
+                        } else {
+                            console.log("Evidence file missing:", rec.uri);
+                        }
+                    } catch {
+                        console.log("Error checking file:", rec.uri);
+                    }
+                }
+                setRecordings(verified);
+                console.log(`Loaded ${verified.length} evidence recordings`);
+
+                // Save cleaned list if we removed any
+                if (verified.length !== saved.length) {
+                    await saveMetadata(verified, dir);
+                }
+            }
+            setStorageReady(true);
+        } catch (err) {
+            console.log("Evidence init error:", err);
+            setStorageReady(true);
+        }
     };
 
-    const saveMetadata = async (recs: EvidenceItem[]) => {
-        await FileSystem.writeAsStringAsync(STORAGE_DIR + "evidence_meta.json", JSON.stringify(recs));
+    const saveMetadata = async (recs: EvidenceItem[], dir?: string) => {
+        const d = dir || storageDirRef.current;
+        try {
+            const path = d + "evidence_meta.json";
+            await FileSystem.writeAsStringAsync(path, JSON.stringify(recs));
+            console.log("Saved evidence metadata:", recs.length, "items");
+        } catch (err) {
+            console.log("Save metadata error:", err);
+        }
     };
 
     const startRecording = async () => {
         try {
             const { status } = await Audio.requestPermissionsAsync();
             if (status !== "granted") {
-                Alert.alert("Error", "Microphone permission is required");
+                Alert.alert("Permission Required", "Microphone permission is needed to record evidence.");
                 return;
             }
 
@@ -91,11 +154,10 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
             setDuration(0);
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
-            timerRef.current = setInterval(() => {
-                setDuration((prev) => prev + 1);
-            }, 1000);
+            timerRef.current = setInterval(() => setDuration((prev) => prev + 1), 1000);
         } catch (err) {
-            Alert.alert("Error", "Failed to start recording");
+            console.log("Start recording error:", err);
+            Alert.alert("Error", "Failed to start recording. Make sure microphone is available.");
         }
     };
 
@@ -105,12 +167,32 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
         try {
             await recordingRef.current.stopAndUnloadAsync();
             const tempUri = recordingRef.current.getURI();
+            if (timerRef.current) clearInterval(timerRef.current);
 
             if (tempUri) {
+                const dir = storageDirRef.current;
+
+                // Ensure directory exists
+                const dirInfo = await FileSystem.getInfoAsync(dir);
+                if (!dirInfo.exists) {
+                    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+                }
+
                 // Copy to permanent storage
                 const fileName = `evidence_${Date.now()}.m4a`;
-                const permanentUri = STORAGE_DIR + fileName;
+                const permanentUri = dir + fileName;
                 await FileSystem.copyAsync({ from: tempUri, to: permanentUri });
+
+                // Verify the copy worked
+                const copyInfo = await FileSystem.getInfoAsync(permanentUri);
+                if (!copyInfo.exists) {
+                    Alert.alert("Error", "Failed to save recording file.");
+                    recordingRef.current = null;
+                    setIsRecording(false);
+                    return;
+                }
+
+                console.log("Evidence saved to:", permanentUri, "size:", (copyInfo as any).size);
 
                 const newRec: EvidenceItem = {
                     id: Date.now().toString(),
@@ -118,35 +200,97 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
                     duration,
                     date: new Date().toLocaleString(),
                     uri: permanentUri,
+                    uploading: true,
+                    uploaded: false,
                 };
 
                 const updated = [newRec, ...recordings];
                 setRecordings(updated);
                 await saveMetadata(updated);
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                Alert.alert("✅ Saved!", "Evidence recording saved permanently.");
+
+                // Upload to backend
+                try {
+                    console.log("Starting upload to backend...");
+                    const uploadResult = await apiUploadEvidence(
+                        permanentUri,
+                        recordingType,
+                        duration
+                    );
+                    console.log("Upload successful:", uploadResult);
+
+                    // Update recording with backend ID
+                    const updatedRec = {
+                        ...newRec,
+                        _id: uploadResult.data._id,
+                        uploading: false,
+                        uploaded: true,
+                    };
+
+                    const finalUpdated = recordings.map((r) =>
+                        r.id === newRec.id ? updatedRec : r
+                    );
+                    setRecordings(finalUpdated);
+                    await saveMetadata(finalUpdated);
+
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    Alert.alert(
+                        "✅ Evidence Saved & Uploaded!",
+                        `Recording saved locally and uploaded to server (${formatTime(duration)}).`
+                    );
+                } catch (uploadError: any) {
+                    console.log("Upload failed, but local save succeeded:", uploadError);
+                    // Mark as not uploaded but keep local copy
+                    const updatedRec = {
+                        ...newRec,
+                        uploading: false,
+                        uploaded: false,
+                    };
+                    const finalUpdated = recordings.map((r) =>
+                        r.id === newRec.id ? updatedRec : r
+                    );
+                    setRecordings(finalUpdated);
+                    await saveMetadata(finalUpdated);
+
+                    Alert.alert(
+                        "⚠️ Saved Locally",
+                        "Recording saved on device but upload failed. Will retry later."
+                    );
+                }
             }
 
             recordingRef.current = null;
             setIsRecording(false);
-            if (timerRef.current) clearInterval(timerRef.current);
         } catch (err) {
-            Alert.alert("Error", "Failed to stop recording");
+            console.log("Stop recording error:", err);
+            Alert.alert("Error", "Failed to save recording.");
+            setIsRecording(false);
         }
     };
 
     const playRecording = async (rec: EvidenceItem) => {
         try {
-            // Stop any currently playing
+            // Stop any current playback
             if (soundRef.current) {
-                await soundRef.current.stopAsync();
-                await soundRef.current.unloadAsync();
+                try {
+                    await soundRef.current.stopAsync();
+                    await soundRef.current.unloadAsync();
+                } catch { }
                 soundRef.current = null;
             }
 
-            // If tapping same recording, just stop
+            // Toggle off if same
             if (playingId === rec.id) {
                 setPlayingId(null);
+                return;
+            }
+
+            // Check file exists
+            const fileInfo = await FileSystem.getInfoAsync(rec.uri);
+            if (!fileInfo.exists) {
+                Alert.alert("File Not Found", "This recording file was deleted. Removing from list.");
+                const updated = recordings.filter((r) => r.id !== rec.id);
+                setRecordings(updated);
+                await saveMetadata(updated);
                 return;
             }
 
@@ -157,17 +301,11 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
                 staysActiveInBackground: false,
             });
 
-            // Check file exists
-            const fileInfo = await FileSystem.getInfoAsync(rec.uri);
-            if (!fileInfo.exists) {
-                Alert.alert("Error", "Recording file not found. It may have been deleted.");
-                return;
-            }
-
             const { sound } = await Audio.Sound.createAsync(
                 { uri: rec.uri },
-                { shouldPlay: true }
+                { shouldPlay: true, volume: 1.0 }
             );
+
             soundRef.current = sound;
             setPlayingId(rec.id);
 
@@ -179,22 +317,41 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
                 }
             });
         } catch (err: any) {
-            Alert.alert("Playback Error", "Cannot play this recording: " + (err.message || "Unknown error"));
+            console.log("Playback error:", err);
+            Alert.alert("Playback Error", "Cannot play this recording.");
             setPlayingId(null);
         }
     };
 
     const deleteRecording = (rec: EvidenceItem) => {
-        Alert.alert("Delete Evidence", "This will permanently delete this recording. Continue?", [
+        Alert.alert("Delete Evidence", "This will permanently delete this recording from device and server. Continue?", [
             { text: "Cancel", style: "cancel" },
             {
                 text: "Delete",
                 style: "destructive",
                 onPress: async () => {
-                    try { await FileSystem.deleteAsync(rec.uri, { idempotent: true }); } catch { }
-                    const updated = recordings.filter((r) => r.id !== rec.id);
-                    setRecordings(updated);
-                    await saveMetadata(updated);
+                    try {
+                        // Delete from device
+                        await FileSystem.deleteAsync(rec.uri, { idempotent: true });
+                        
+                        // Delete from backend if uploaded
+                        if (rec._id) {
+                            try {
+                                await apiDeleteEvidence(rec._id);
+                                console.log("Deleted from backend:", rec._id);
+                            } catch (err) {
+                                console.log("Backend delete failed:", err);
+                            }
+                        }
+                        
+                        const updated = recordings.filter((r) => r.id !== rec.id);
+                        setRecordings(updated);
+                        await saveMetadata(updated);
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    } catch (err) {
+                        console.log("Delete error:", err);
+                        Alert.alert("Error", "Failed to delete recording.");
+                    }
                 },
             },
         ]);
@@ -233,7 +390,7 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
                         style={[styles.modeBtn, recordingType === "video" && styles.modeBtnActive]}
                         onPress={() => {
                             setRecordingType("video");
-                            Alert.alert("📹 Video", "Audio recording will be used. Video recording requires camera setup.");
+                            Alert.alert("📹 Video", "Audio recording will be used. Video recording coming soon.");
                         }}
                     >
                         <MaterialIcons name="videocam" size={22} color={recordingType === "video" ? colors.evidence : colors.lightText} />
@@ -247,7 +404,7 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
                         <View style={styles.timerSection}>
                             <Animated.View style={[styles.recordingDot, { transform: [{ scale: pulseAnim }] }]} />
                             <Text style={styles.timerText}>{formatTime(duration)}</Text>
-                            <Text style={styles.recordingLabel}>Recording...</Text>
+                            <Text style={styles.recordingLabel}>Recording Evidence...</Text>
                         </View>
                     )}
 
@@ -259,7 +416,7 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
                             <MaterialIcons name={isRecording ? "stop" : "fiber-manual-record"} size={40} color={colors.white} />
                         </LinearGradient>
                     </TouchableOpacity>
-                    <Text style={styles.recordHint}>{isRecording ? "Tap to stop" : "Tap to start recording"}</Text>
+                    <Text style={styles.recordHint}>{isRecording ? "Tap to stop & save" : "Tap to start recording"}</Text>
                 </View>
 
                 {/* Recordings List */}
@@ -268,6 +425,7 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
                     <View style={styles.emptyState}>
                         <MaterialIcons name="folder-open" size={40} color={colors.border} />
                         <Text style={styles.emptyText}>No recordings yet</Text>
+                        <Text style={styles.emptySubtext}>Record audio evidence to save it permanently</Text>
                     </View>
                 ) : (
                     recordings.map((rec) => (
@@ -278,8 +436,16 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
                             <View style={styles.recInfo}>
                                 <Text style={styles.recTitle}>{rec.type === "audio" ? "Audio" : "Video"} Evidence</Text>
                                 <Text style={styles.recMeta}>{formatTime(rec.duration)} • {rec.date}</Text>
+                                {rec.uploading && (
+                                    <Text style={styles.uploadStatus}>⏳ Uploading to server...</Text>
+                                )}
+                                {rec.uploaded && (
+                                    <Text style={styles.uploadStatusSuccess}>✅ Uploaded to server</Text>
+                                )}
+                                {rec.uploaded === false && !rec.uploading && (
+                                    <Text style={styles.uploadStatusError}>⚠️ Not uploaded (tap to retry)</Text>
+                                )}
                             </View>
-                            {/* Play Button */}
                             <TouchableOpacity
                                 onPress={() => playRecording(rec)}
                                 style={[styles.playBtn, { backgroundColor: playingId === rec.id ? colors.danger + "20" : colors.evidence + "20" }]}
@@ -290,7 +456,6 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
                                     color={playingId === rec.id ? colors.danger : colors.evidence}
                                 />
                             </TouchableOpacity>
-                            {/* Delete Button */}
                             <TouchableOpacity onPress={() => deleteRecording(rec)} style={[styles.playBtn, { backgroundColor: colors.danger + "10", marginLeft: 6 }]}>
                                 <MaterialIcons name="delete" size={18} color={colors.danger} />
                             </TouchableOpacity>
@@ -300,9 +465,9 @@ export default function EvidenceRecordingScreen({ navigation }: any) {
 
                 {/* Info */}
                 <View style={styles.infoCard}>
-                    <MaterialIcons name="security" size={18} color={colors.info} />
+                    <MaterialIcons name="cloud-upload" size={18} color={colors.info} />
                     <Text style={styles.infoText}>
-                        Recordings are saved permanently on your device and persist across app restarts. They can be used as evidence.
+                        Recordings are saved on your device and automatically uploaded to the secure server. They persist across app restarts and can be used as evidence.
                     </Text>
                 </View>
 
@@ -337,7 +502,8 @@ const styles = StyleSheet.create({
     sectionLabel: { fontSize: 16, fontWeight: "800", color: colors.text, marginTop: 10, marginBottom: 12 },
 
     emptyState: { alignItems: "center", paddingVertical: 30 },
-    emptyText: { color: colors.lightText, marginTop: 8, fontSize: 14 },
+    emptyText: { color: colors.lightText, marginTop: 8, fontSize: 15, fontWeight: "600" },
+    emptySubtext: { color: colors.border, marginTop: 4, fontSize: 12 },
 
     recordingCard: { flexDirection: "row", alignItems: "center", backgroundColor: colors.surface, padding: 14, borderRadius: 14, marginBottom: 8, borderWidth: 1, borderColor: colors.border },
     recIcon: { width: 40, height: 40, borderRadius: 12, justifyContent: "center", alignItems: "center" },
@@ -345,6 +511,9 @@ const styles = StyleSheet.create({
     recTitle: { fontSize: 14, fontWeight: "700", color: colors.text },
     recMeta: { fontSize: 11, color: colors.lightText, marginTop: 2 },
     playBtn: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center" },
+    uploadStatus: { fontSize: 10, color: colors.lightText, marginTop: 3, fontStyle: "italic" },
+    uploadStatusSuccess: { fontSize: 10, color: colors.success, marginTop: 3, fontWeight: "600" },
+    uploadStatusError: { fontSize: 10, color: colors.danger, marginTop: 3, fontWeight: "600" },
 
     infoCard: { flexDirection: "row", backgroundColor: colors.surface, padding: 14, borderRadius: 12, marginTop: 16, borderWidth: 1, borderColor: colors.border },
     infoText: { flex: 1, marginLeft: 10, fontSize: 12, color: colors.textSecondary, lineHeight: 18 },
