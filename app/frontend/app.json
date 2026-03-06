@@ -51,10 +51,7 @@
       "react-native-ble-plx"
     ],
     "extra": {
-      "eas": {
-        "projectId": "d8e05a6a-8110-40ff-807b-9c4003c66be9"
-      }
-    },
-    "owner": "ojaswini_1201"
+      "eas": {}
+    }
   }
 }
