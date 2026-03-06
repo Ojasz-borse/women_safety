@@ -2,33 +2,41 @@ import apiClient from "./apiClient";
 import { Linking, Platform, Alert } from "react-native";
 
 /**
- * Trigger SOS alert — calls backend which sends SMS via Twilio + email via nodemailer
- * If backend fails, opens native SMS as fallback
+ * Trigger SOS alert — sends SMS to all emergency contacts (user + collaborator)
+ * Backend uses Fast2SMS for direct SMS delivery to Indian numbers
  */
 export const triggerSOS = async (latitude: number, longitude: number, address: string) => {
   try {
     const response = await apiClient.post("/sos/trigger", { latitude, longitude, address });
     const data = response.data;
 
-    // If backend delivered 0 SMS, try native SMS fallback
-    if (data.smsSentCount === 0) {
-      console.log("Backend SMS failed, trying native SMS fallback...");
-      await sendNativeSMS(latitude, longitude);
+    console.log(`✅ SOS triggered! SMS sent to ${data.smsSentCount}/${data.smsTotalCount} contacts`);
+    
+    if (data.hasCollaborator) {
+      console.log("🤝 Collaborator contacts included in SMS blast");
     }
 
     return data;
   } catch (error: any) {
-    // Backend completely unreachable — send native SMS
-    console.log("Backend SOS failed:", error.message || error);
+    console.log("❌ Backend SOS failed:", error.message || error);
+    
+    // Fallback: Try native SMS if backend fails completely
     await sendNativeSMS(latitude, longitude);
+    
     // Return a local result so the app doesn't crash
-    return { success: true, alertId: "local-" + Date.now(), smsSentCount: 0, smsTotalCount: 0 };
+    return { 
+      success: true, 
+      alertId: "local-" + Date.now(), 
+      smsSentCount: 0, 
+      smsTotalCount: 0,
+      hasCollaborator: false
+    };
   }
 };
 
 /**
- * Send native SMS via phone's messaging app using Linking
- * This always works — opens the SMS app with pre-filled message
+ * Send native SMS via phone's messaging app using Linking (fallback only)
+ * This opens the SMS app with pre-filled message
  */
 const sendNativeSMS = async (latitude: number, longitude: number) => {
   try {
@@ -57,7 +65,7 @@ const sendNativeSMS = async (latitude: number, longitude: number) => {
     if (canOpen) {
       await Linking.openURL(smsUrl);
     } else {
-      // Try opening just the first number  
+      // Try opening just the first number
       const singleSms = `sms:${phones[0]}${sep}body=${encodeURIComponent(message)}`;
       await Linking.openURL(singleSms);
     }
