@@ -18,9 +18,9 @@
       "package": "com.safeguard.womensafety",
       "adaptiveIcon": {
         "backgroundColor": "#0D0B1A",
-        "foregroundImage": "./assets/icon-foreground.png",
-        "backgroundImage": "./assets/icon-background.png",
-        "monochromeImage": "./assets/icon-monochrome.png"
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "permissions": [
         "ACCESS_FINE_LOCATION",
@@ -47,3 +47,4 @@
     }
   }
 }
+
