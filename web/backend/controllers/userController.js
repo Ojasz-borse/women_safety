@@ -13,11 +13,23 @@ exports.getProfile = async (req, res) => {
 exports.updateProfile = async (req, res) => {
     try {
         const user = await User.findById(req.user.id);
+        
+        // Update all allowed fields
         if (req.body.name) user.name = req.body.name;
+        if (req.body.phoneNumber) user.phoneNumber = req.body.phoneNumber;
+        if (req.body.bloodGroup) user.bloodGroup = req.body.bloodGroup;
+        if (req.body.address) user.address = req.body.address;
         if (req.file) user.profilePhoto = `/uploads/${req.file.filename}`;
+        
         await user.save();
-        res.json(user);
-    } catch (err) { res.status(500).json({ message: err.message }); }
+        res.json({ 
+            success: true,
+            message: "Profile updated successfully",
+            user 
+        });
+    } catch (err) { 
+        res.status(500).json({ message: err.message }); 
+    }
 };
 
 exports.deleteAccount = async (req, res) => {
